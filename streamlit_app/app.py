@@ -24,6 +24,8 @@ from utils import (
     format_batch_summary,
     write_batch_summary,
     BatchResult,
+    clean_name_for_prefix,
+    extract_first_fasta_header,
 )
 from probedesign.output import (
     format_oligos_content,
@@ -35,7 +37,7 @@ from probedesign.output import (
 # ── Page config ──────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="ProbeDesign",
+    page_title="smFISH ProbeDesign",
     layout="wide",
 )
 
@@ -55,7 +57,7 @@ for key, default in {
 # ── Sidebar — parameters panel ───────────────────────────────────────────────
 
 with st.sidebar:
-    st.header("ProbeDesign")
+    st.header("Probe Design")
 
     mode = st.radio(
         "Mode",
@@ -249,7 +251,7 @@ def _show_single_results():
                 "Name": p.name,
             })
         df = pd.DataFrame(probe_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width='stretch', hide_index=True)
 
         # Sequence alignment viewer
         seq_content = format_seq_content(result, mask_seqs=result.mask_strings)
@@ -316,25 +318,7 @@ if mode == "Single sequence":
     st.title("ProbeDesign")
     st.caption("Design oligonucleotide probes for single molecule RNA FISH")
 
-    # Input tabs
-    upload_tab, paste_tab = st.tabs(["Upload FASTA", "Paste FASTA"])
-
-    with upload_tab:
-        uploaded_file = st.file_uploader(
-            "Choose a FASTA file",
-            type=["fa", "fasta", "txt"],
-            key="single_upload",
-        )
-
-    with paste_tab:
-        pasted_text = st.text_area(
-            "Paste FASTA-formatted sequence",
-            height=200,
-            placeholder=">gene_name\nATCGATCG...",
-            key="single_paste",
-        )
-
-    # Output name
+    # Output name (shown above tabs so it's always visible)
     output_name = st.text_input(
         "Output name prefix (optional, auto-derived from filename)",
         value="",
@@ -345,22 +329,49 @@ if mode == "Single sequence":
     if gibbs_min >= gibbs_max:
         st.warning("Gibbs min should be less than Gibbs max.")
 
-    # Run button
-    if st.button("Design Probes", key="single_run_btn", type="primary"):
+    # Input tabs — each tab has its own run button to unambiguously signal input source
+    upload_tab, paste_tab = st.tabs(["Upload FASTA", "Paste FASTA"])
+
+    with upload_tab:
+        uploaded_file = st.file_uploader(
+            "Choose a FASTA file",
+            type=["fa", "fasta", "txt"],
+            key="single_upload",
+        )
+        run_from_upload = st.button("Design Probes", key="single_run_upload", type="primary")
+
+    with paste_tab:
+        pasted_text = st.text_area(
+            "Paste FASTA-formatted sequence",
+            height=200,
+            placeholder=">gene_name\nATCGATCG...",
+            key="single_paste",
+        )
+        run_from_paste = st.button("Design Probes", key="single_run_paste", type="primary")
+
+    if run_from_upload or run_from_paste:
         # Clean up previous temp files
         cleanup_temp_files(st.session_state["temp_files"])
         st.session_state["temp_files"] = []
         st.session_state["single_result"] = None
 
-        # Resolve input
         input_path = None
         input_name = None
-        if uploaded_file is not None:
+        auto_name = None
+
+        if run_from_upload:
+            if uploaded_file is None:
+                st.warning("Please upload a FASTA file.")
+                st.stop()
             tmp_path = save_uploaded_file_to_temp(uploaded_file)
             st.session_state["temp_files"].append(tmp_path)
             input_path = str(tmp_path)
             input_name = uploaded_file.name
-        elif pasted_text.strip():
+            auto_name = clean_name_for_prefix(Path(uploaded_file.name).stem)
+        else:  # run_from_paste
+            if not pasted_text.strip():
+                st.warning("Please paste a FASTA sequence.")
+                st.stop()
             valid, err = validate_fasta_text(pasted_text)
             if not valid:
                 st.error(f"Invalid FASTA: {err}")
@@ -369,9 +380,8 @@ if mode == "Single sequence":
             st.session_state["temp_files"].append(tmp_path)
             input_path = str(tmp_path)
             input_name = "pasted_sequence"
-        else:
-            st.warning("Please upload a file or paste a sequence.")
-            st.stop()
+            header = extract_first_fasta_header(pasted_text)
+            auto_name = clean_name_for_prefix(header) if header else "probe"
 
         # Resolve repeatmask file
         rm_file = _resolve_repeatmask_file()
@@ -382,8 +392,8 @@ if mode == "Single sequence":
         if not _run_prereq_checks():
             st.stop()
 
-        # Run design
-        resolved_name = output_name.strip() if output_name.strip() else None
+        # Run design — prefer explicit user input, fall back to auto-derived name
+        resolved_name = output_name.strip() if output_name.strip() else auto_name
 
         with st.spinner("Running probe design..."):
             run_result = run_design(
@@ -463,6 +473,7 @@ else:
 
         # Resolve input files
         fasta_paths = []
+        batch_name_overrides = {}
         if input_method == "Directory path":
             if not input_dir or not Path(input_dir).is_dir():
                 st.error(f"Directory not found: {input_dir}")
@@ -479,6 +490,7 @@ else:
                 tmp = save_uploaded_file_to_temp(uf)
                 st.session_state["temp_files"].append(tmp)
                 fasta_paths.append(tmp)
+                batch_name_overrides[tmp] = clean_name_for_prefix(Path(uf.name).stem)
 
         # Resolve repeatmask file
         rm_file = _resolve_repeatmask_file()
@@ -522,6 +534,7 @@ else:
             output_dir=batch_output_dir,
             params=params,
             progress_callback=_progress_cb,
+            name_overrides=batch_name_overrides if batch_name_overrides else None,
         )
 
         # Write summary file
@@ -549,7 +562,7 @@ else:
                 "Error": br.error_msg or "",
             })
         df = pd.DataFrame(summary_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width='stretch', hide_index=True)
 
         # Summary download
         summary_text = format_batch_summary(batch_results)
@@ -580,7 +593,7 @@ else:
                     ]
                     st.dataframe(
                         pd.DataFrame(probe_data),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                     )
             elif br.error_msg:

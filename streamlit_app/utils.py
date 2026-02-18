@@ -38,6 +38,47 @@ GENOME_DB = {
 }
 
 
+# --- Name helpers ---
+
+
+def clean_name_for_prefix(name: str) -> str:
+    """Convert a filename stem or FASTA header into a clean output name prefix.
+
+    - Strips leading '>' (FASTA header marker) and surrounding whitespace
+    - Replaces whitespace and non-alphanumeric/dot/dash characters with '_'
+    - Squeezes consecutive underscores
+    - Strips leading/trailing underscores
+    - Falls back to 'probe' if the result would be empty
+
+    Args:
+        name: Raw string (filename stem or FASTA header text)
+
+    Returns:
+        Cleaned string suitable for use as an output name prefix.
+    """
+    name = name.lstrip(">").strip()
+    name = re.sub(r'[^\w.\-]', '_', name)
+    name = re.sub(r'_+', '_', name)
+    name = name.strip('_')
+    return name if name else "probe"
+
+
+def extract_first_fasta_header(text: str) -> str:
+    """Return the text of the first FASTA header line (everything after '>').
+
+    Args:
+        text: Raw FASTA text
+
+    Returns:
+        Header text (stripped), or empty string if no header found.
+    """
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith(">"):
+            return line[1:].strip()
+    return ""
+
+
 # --- FASTA validation and temp file helpers ---
 
 
@@ -335,6 +376,7 @@ def run_batch(
     output_dir: str,
     params: dict,
     progress_callback: Optional[Callable] = None,
+    name_overrides: Optional[Dict[Path, str]] = None,
 ) -> List[BatchResult]:
     """Run probe design on a list of FASTA files.
 
@@ -353,11 +395,11 @@ def run_batch(
     batch_results = []
 
     for i, fasta_path in enumerate(fasta_paths):
-        fname = fasta_path.name
+        resolved_output_name = (name_overrides or {}).get(fasta_path, fasta_path.stem)
+        fname = resolved_output_name
 
         if progress_callback:
             progress_callback(i, len(fasta_paths), fname)
-
         run_result = run_design(
             input_path=str(fasta_path),
             n_probes=params.get("n_probes", 48),
@@ -365,7 +407,7 @@ def run_batch(
             spacer_length=params.get("spacer_length", 2),
             target_gibbs=params.get("target_gibbs", -23.0),
             allowable_gibbs=params.get("allowable_gibbs", (-26.0, -20.0)),
-            output_name=fasta_path.stem,
+            output_name=resolved_output_name,
             species=params.get("species", "human"),
             pseudogene_mask=params.get("pseudogene_mask", False),
             genome_mask=params.get("genome_mask", False),
@@ -376,7 +418,7 @@ def run_batch(
         )
 
         if run_result.result is not None and run_result.result.probes:
-            prefix = fasta_path.stem
+            prefix = resolved_output_name
             write_output_files(
                 run_result.result,
                 prefix,

@@ -1,0 +1,43 @@
+# ProbeDesign conda environment
+#
+# Supported platforms:  macOS (Intel & Apple Silicon), Linux (x86_64 & aarch64)
+# NOT supported natively: Windows (use WSL2 — see README.md)
+#
+# Create the environment:
+#   micromamba env create -f streamlit_app/environment.yml
+#   mamba     env create -f streamlit_app/environment.yml
+#   conda     env create -f streamlit_app/environment.yml
+#
+# Then install the probedesign package (from the repo root):
+#   micromamba run -n probedesign pip install -e .
+#
+# Activate and launch:
+#   micromamba activate probedesign   (or: mamba / conda activate probedesign)
+#   streamlit run streamlit_app/app.py
+
+name: probedesign
+
+channels:
+  - conda-forge     # General scientific Python packages
+  - bioconda        # Bioinformatics tools (bowtie)
+  # 'defaults' is intentionally omitted to avoid Anaconda licensing issues
+
+dependencies:
+  # ── Core runtime ────────────────────────────────────────────────────────────
+  - python=3.11
+
+  # ── CLI framework (required by the probedesign package) ─────────────────────
+  - click>=8.0
+
+  # ── Short-read aligner for masking (linux-64/linux-aarch64/osx-64/osx-arm64)
+  #    Not available on Windows — use WSL2 if on Windows
+  - bowtie=1.3.1
+
+  # ── Testing ─────────────────────────────────────────────────────────────────
+  - pytest>=7.0
+
+  # ── Web app dependencies ─────────────────────────────────────────────────────
+  - pip
+  - pip:
+    - streamlit>=1.32
+    - pandas>=1.5
