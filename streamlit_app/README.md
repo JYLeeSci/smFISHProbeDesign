@@ -108,7 +108,7 @@ If you haven't already cloned the repository:
 #   macOS: git comes pre-installed; or: xcode-select --install
 #   Linux: sudo apt install git   (Ubuntu/Debian)
 
-git clone https://github.com/arjunrajlaboratory/ProbeDesign.git
+git clone https://github.com/JYLeeSci/smFISHProbeDesign.git
 cd ProbeDesign
 ```
 
