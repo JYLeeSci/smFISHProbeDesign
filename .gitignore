@@ -15,3 +15,9 @@ build/
 bowtie_indexes/
 *.ebwt
 *.ebwtl
+*.bt2
+
+# Pseudogene / large DB files (don't commit large FASTA/text DBs)
+probedesign/pseudogeneDBs/
+probedesign/pseudogeneDBs/*.fasta
+probedesign/pseudogeneDBs/*.txt

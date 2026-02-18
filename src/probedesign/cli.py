@@ -90,6 +90,12 @@ def main():
     default=False,
     help='Run RepeatMasker to automatically mask repeat regions (default: off)'
 )
+@click.option(
+    '--save-bowtie-raw',
+    is_flag=True,
+    default=False,
+    help='Save raw bowtie alignment output (large files)'
+)
 def design(
     input_file: str,
     n_probes: int,
@@ -105,6 +111,7 @@ def design(
     index_dir: str,
     repeatmask_file: str,
     repeatmask: bool,
+    save_bowtie_raw: bool,
 ):
     """Design probes for a target sequence.
 
@@ -171,6 +178,7 @@ def design(
         genome_mask=genome_mask,
         index_dir=index_dir,
         repeatmask_file=actual_repeatmask_file,
+        save_bowtie_raw=save_bowtie_raw,
     )
 
     if not result.probes:
@@ -186,6 +194,14 @@ def design(
         click.echo(f"\nOutput files:")
         click.echo(f"  {output}_oligos.txt")
         click.echo(f"  {output}_seq.txt")
+        if result.bowtie_pseudogene_hits is not None:
+            click.echo(f"  {output}_bowtie_pseudogene.txt")
+        if result.bowtie_genome_hits is not None:
+            click.echo(f"  {output}_bowtie_genome.txt")
+        if result.bowtie_pseudogene_raw is not None:
+            click.echo(f"  {output}_bowtie_pseudogene_raw.txt")
+        if result.bowtie_genome_raw is not None:
+            click.echo(f"  {output}_bowtie_genome_raw.txt")
         click.echo(f"\nProbes:")
         click.echo(format_probes_table(result))
 

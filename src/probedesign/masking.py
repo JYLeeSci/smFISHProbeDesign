@@ -90,7 +90,7 @@ def run_bowtie(
     index_dir: Optional[Path] = None,
     mismatches: int = 0,
     max_hits: int = 1,
-) -> List[int]:
+) -> Tuple[List[int], str]:
     """Run bowtie alignment and return hit counts per position.
 
     Args:
@@ -102,7 +102,8 @@ def run_bowtie(
         max_hits: Maximum alignments to report per read (default 1)
 
     Returns:
-        List of hit counts, one per position in the sequence
+        Tuple of (hits, raw_output) where hits is a list of hit counts
+        per position and raw_output is the raw bowtie alignment text
     """
     if index_dir is None:
         index_dir = DEFAULT_INDEX_DIR
@@ -112,7 +113,7 @@ def run_bowtie(
     hits = [0] * len(seq)
 
     if num_positions <= 0:
-        return hits
+        return hits, ""
 
     # Generate n-mer FASTA
     nmers_fasta = sequence_to_nmers(seq, mer_length)
@@ -149,9 +150,11 @@ def run_bowtie(
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Bowtie not found: {e}")
 
+    raw_output = result.stdout
+
     # Parse bowtie output
     # Default output format: read_name, strand, ref_name, offset, seq, qual, num_other_alignments, mismatches
-    for line in result.stdout.strip().split("\n"):
+    for line in raw_output.strip().split("\n"):
         if not line:
             continue
         cols = line.split("\t")
@@ -163,7 +166,7 @@ def run_bowtie(
             except (ValueError, IndexError):
                 continue
 
-    return hits
+    return hits, raw_output
 
 
 def hits_to_mask(
@@ -233,7 +236,7 @@ def pseudogene_mask(
     seq: str,
     species: str = "human",
     index_dir: Optional[Path] = None,
-) -> List[int]:
+) -> Tuple[List[int], List[int], str]:
     """Create a mask for regions that align to pseudogenes.
 
     Uses 16-mer alignment with threshold of 0 (any hit triggers masking).
@@ -245,7 +248,9 @@ def pseudogene_mask(
         index_dir: Directory containing bowtie indexes
 
     Returns:
-        Binary mask (1 = masked, 0 = unmasked)
+        Tuple of (mask, hits, raw_bowtie_output) where mask is a binary mask
+        (1 = masked, 0 = unmasked), hits is the per-position hit count array,
+        and raw_bowtie_output is the raw bowtie alignment text
     """
     # Map species to database name
     db_map = {
@@ -261,7 +266,7 @@ def pseudogene_mask(
         raise ValueError(f"Unknown species: {species}. Valid options: {list(db_map.keys())}")
 
     # Run bowtie with 16-mers
-    hits = run_bowtie(seq, mer_length=16, database=db, index_dir=index_dir)
+    hits, raw_text = run_bowtie(seq, mer_length=16, database=db, index_dir=index_dir)
 
     # Convert to mask (threshold=0 means any hit)
     mask = hits_to_mask(hits, mer_length=16, threshold=0)
@@ -269,14 +274,14 @@ def pseudogene_mask(
     # Remove short runs
     mask = remove_short_runs(mask, min_length=20, tolerance=2)
 
-    return mask
+    return mask, hits, raw_text
 
 
 def genome_mask(
     seq: str,
     species: str = "human",
     index_dir: Optional[Path] = None,
-) -> List[int]:
+) -> Tuple[List[int], dict, str]:
     """Create a mask for regions that align to multiple genomic locations.
 
     Uses multiple mer lengths with different thresholds:
@@ -290,7 +295,10 @@ def genome_mask(
         index_dir: Directory containing bowtie indexes
 
     Returns:
-        Binary mask (1 = masked, 0 = unmasked)
+        Tuple of (mask, hits_dict, raw_bowtie_output) where mask is a binary
+        mask (1 = masked, 0 = unmasked), hits_dict contains per-position hit
+        counts for each tier {"12mer":[], "14mer":[], "16mer":[]}, and
+        raw_bowtie_output is the combined raw bowtie alignment text
     """
     # Map species to database name
     db_map = {
@@ -308,9 +316,22 @@ def genome_mask(
 
     # Run bowtie with different parameters
     # Note: We need -k to be high enough to count hits above threshold
-    hits_12 = run_bowtie(seq, mer_length=12, database=db, index_dir=index_dir, max_hits=5000)
-    hits_14 = run_bowtie(seq, mer_length=14, database=db, index_dir=index_dir, max_hits=1000)
-    hits_16 = run_bowtie(seq, mer_length=16, database=db, index_dir=index_dir, max_hits=100)
+    hits_12, raw_12 = run_bowtie(seq, mer_length=12, database=db, index_dir=index_dir, max_hits=5000)
+    hits_14, raw_14 = run_bowtie(seq, mer_length=14, database=db, index_dir=index_dir, max_hits=1000)
+    hits_16, raw_16 = run_bowtie(seq, mer_length=16, database=db, index_dir=index_dir, max_hits=100)
+
+    # Combine raw output with section headers
+    sections = [
+        "=== 12-mer alignment (k=5000, threshold=4000) ===",
+        raw_12,
+        "",
+        "=== 14-mer alignment (k=1000, threshold=500) ===",
+        raw_14,
+        "",
+        "=== 16-mer alignment (k=100, threshold=20) ===",
+        raw_16,
+    ]
+    combined_raw = "\n".join(sections)
 
     # Convert to masks with respective thresholds
     mask_12 = hits_to_mask(hits_12, mer_length=12, threshold=4000)
@@ -323,7 +344,8 @@ def genome_mask(
         if mask_12[i] or mask_14[i] or mask_16[i]:
             combined[i] = 1
 
-    return combined
+    hits_dict = {"12mer": hits_12, "14mer": hits_14, "16mer": hits_16}
+    return combined, hits_dict, combined_raw
 
 
 def mask_to_badness(
@@ -377,7 +399,7 @@ def create_full_mask(
 
     if pseudogene:
         try:
-            pmask = pseudogene_mask(seq, species, index_dir)
+            pmask, _, _ = pseudogene_mask(seq, species, index_dir)
             for i, v in enumerate(pmask):
                 combined[i] += v
             # Create visualization string
@@ -388,7 +410,7 @@ def create_full_mask(
 
     if genome:
         try:
-            gmask = genome_mask(seq, species, index_dir)
+            gmask, _, _ = genome_mask(seq, species, index_dir)
             for i, v in enumerate(gmask):
                 combined[i] += v
             # Create visualization string

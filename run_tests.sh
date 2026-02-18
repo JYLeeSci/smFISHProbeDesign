@@ -76,9 +76,9 @@ compare_probes() {
     local actual="$2"
     local test_name="$3"
 
-    # Extract just the sequences (column 5)
-    local expected_seqs=$(cut -f5 "$expected" | sort)
-    local actual_seqs=$(cut -f5 "$actual" | sort)
+    # Extract just the sequences (second-to-last column, works with both old 6-col and new 7-col format)
+    local expected_seqs=$(awk -F'\t' '{print $(NF-1)}' "$expected" | sort)
+    local actual_seqs=$(awk -F'\t' '{print $(NF-1)}' "$actual" | sort)
 
     local expected_count=$(echo "$expected_seqs" | grep -c . || echo 0)
     local actual_count=$(echo "$actual_seqs" | grep -c . || echo 0)
@@ -194,8 +194,8 @@ if [ "$BOWTIE_AVAILABLE" = true ] && [ -d "$INDEX_DIR" ]; then
             TESTS_PASSED=$((TESTS_PASSED + 1))
         else
             # Check if it's a partial match (>=75%)
-            EIF_expected_seqs=$(cut -f5 "$TEST_DIR/EIF1_CDS_HCR/EIF1_CDS_HCR_oligos.txt" | sort)
-            EIF_actual_seqs=$(cut -f5 "$TMP_DIR/EIF1_HCR_oligos.txt" | sort)
+            EIF_expected_seqs=$(awk -F'\t' '{print $(NF-1)}' "$TEST_DIR/EIF1_CDS_HCR/EIF1_CDS_HCR_oligos.txt" | sort)
+            EIF_actual_seqs=$(awk -F'\t' '{print $(NF-1)}' "$TMP_DIR/EIF1_HCR_oligos.txt" | sort)
             EIF_expected_count=$(echo "$EIF_expected_seqs" | grep -c . || echo 0)
             EIF_matches=$(comm -12 <(echo "$EIF_expected_seqs") <(echo "$EIF_actual_seqs") | grep -c . || echo 0)
             EIF_pct=$((EIF_matches * 100 / EIF_expected_count))

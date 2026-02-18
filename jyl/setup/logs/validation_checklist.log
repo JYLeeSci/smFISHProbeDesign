@@ -1,0 +1,25 @@
+=== Validation Checklist ===
+Date: Tue Feb 17 20:48:58 GMT 2026
+Location: /Users/jefflee/Documents/Github/smFISHProbeDesign
+
+[1/5] probedesign --version
+Result: PASS - probedesign, version 0.1.0
+
+[2/5] bowtie --version
+Result: PASS - /Users/jefflee/micromamba/envs/probedesign/bin/bowtie-align-s version 1.3.1
+
+[3/5] CDKN1A_32 test
+Result: PASS - 32/32 probes match
+
+[4/5] KRT19 test
+Result: PASS - 6/6 probes match
+
+[5/5] EIF1 HCR test
+Result: PASS - 15/20 probes match (75%)
+
+
+=== Summary ===
+Total: 5
+Passed: 5
+Failed: 0
+Status: ALL PASSED

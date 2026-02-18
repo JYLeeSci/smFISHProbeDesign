@@ -1,0 +1,44 @@
+Designing probes for test_cases/CDKN1A_32/CDKN1A.fa...
+Repeat masking (from file): 174 positions masked
+
+Found 32 probes (score: 0.0859)
+
+Output files:
+  jyl/setup/outputs/CDKN1A_test_oligos.txt
+  jyl/setup/outputs/CDKN1A_test_seq.txt
+
+Probes:
+Index	GC%	Tm	Gibbs	Sequence	Name
+----------------------------------------------------------------------
+1	55	60.7	-22.9	caaggaactgacttcggcag	jyl/setup/outputs/CDKN1A_test_1
+2	50	60.5	-23.0	caaagtcgaagttccatcgc	jyl/setup/outputs/CDKN1A_test_2
+3	55	62.0	-22.8	ggcacaagggtacaagacag	jyl/setup/outputs/CDKN1A_test_3
+4	45	65.0	-23.2	gaaatctgtcatgctggtct	jyl/setup/outputs/CDKN1A_test_4
+5	45	64.3	-23.2	cttcctcttggagaagatca	jyl/setup/outputs/CDKN1A_test_5
+6	55	63.9	-23.4	aggcagaagatgtagagcgg	jyl/setup/outputs/CDKN1A_test_6
+7	50	64.2	-22.6	agggtatgtacatgaggagg	jyl/setup/outputs/CDKN1A_test_7
+8	45	61.5	-22.7	aattctaatgccagaggctg	jyl/setup/outputs/CDKN1A_test_8
+9	35	63.0	-23.4	accgcctagtttttgtttaa	jyl/setup/outputs/CDKN1A_test_9
+10	40	64.0	-23.0	actcttaggaacctctcatt	jyl/setup/outputs/CDKN1A_test_10
+11	50	60.0	-22.6	cgggatgaggaggctttaaa	jyl/setup/outputs/CDKN1A_test_11
+12	55	60.0	-22.9	tccgggagagaggaaaagga	jyl/setup/outputs/CDKN1A_test_12
+13	60	63.0	-23.1	gacaagtggggaggaggaag	jyl/setup/outputs/CDKN1A_test_13
+14	40	60.3	-23.1	aatttcataaccgcctgtga	jyl/setup/outputs/CDKN1A_test_14
+15	40	65.1	-23.0	aagtgccatctgtttacttc	jyl/setup/outputs/CDKN1A_test_15
+16	40	61.3	-23.2	aaagtttttgatgatgcccc	jyl/setup/outputs/CDKN1A_test_16
+17	55	64.3	-23.5	caaccttagaggaggtgagg	jyl/setup/outputs/CDKN1A_test_17
+18	50	62.3	-22.7	aagacagaggggggtatcaa	jyl/setup/outputs/CDKN1A_test_18
+19	55	60.9	-23.0	aaggctcaacactgagacgg	jyl/setup/outputs/CDKN1A_test_19
+20	55	62.3	-22.9	ctcaaaaggtacaggggagc	jyl/setup/outputs/CDKN1A_test_20
+21	55	62.3	-23.2	agaaaaagggtagctggggc	jyl/setup/outputs/CDKN1A_test_21
+22	55	65.3	-23.7	agcagaggggaattgcagag	jyl/setup/outputs/CDKN1A_test_22
+23	60	61.7	-23.2	aaaggacaagggggagggac	jyl/setup/outputs/CDKN1A_test_23
+24	55	63.9	-22.8	gagctgagagggtactgaag	jyl/setup/outputs/CDKN1A_test_24
+25	55	66.5	-23.7	ctgaggtagaactagggtgc	jyl/setup/outputs/CDKN1A_test_25
+26	40	60.7	-23.0	tcatatacccctaacacaga	jyl/setup/outputs/CDKN1A_test_26
+27	45	63.0	-23.4	tcctagaaagatctactccc	jyl/setup/outputs/CDKN1A_test_27
+28	55	60.7	-22.7	aatgaactggggagggatgg	jyl/setup/outputs/CDKN1A_test_28
+29	40	60.2	-22.8	ttgttccgctgctaatcaaa	jyl/setup/outputs/CDKN1A_test_29
+30	40	61.0	-22.9	gccaccatcttaaaatgtct	jyl/setup/outputs/CDKN1A_test_30
+31	50	61.4	-22.9	acgttagtgccaggaaagac	jyl/setup/outputs/CDKN1A_test_31
+32	45	62.0	-22.8	ctccaagtacactaagcact	jyl/setup/outputs/CDKN1A_test_32

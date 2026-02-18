@@ -1,0 +1,117 @@
+
+
+Transaction
+
+  Prefix: /Users/jefflee/micromamba/envs/probedesign
+
+  Updating specs:
+
+   - python=3.11
+   - click>=8.0
+   - bowtie=1.3.1
+   - pytest>=7.0
+
+
+  Package               Version  Build                  Channel           Size
+────────────────────────────────────────────────────────────────────────────────
+  Install:
+────────────────────────────────────────────────────────────────────────────────
+
+  + bowtie                1.3.1  py311h697f9a0_10       bioconda         924kB
+  + bzip2                 1.0.8  hd037594_8             conda-forge     Cached
+  + ca-certificates    2026.1.4  hbd8a1cb_0             conda-forge     Cached
+  + click                 8.3.1  pyh8f84b5b_1           conda-forge       98kB
+  + colorama              0.4.6  pyhd8ed1ab_1           conda-forge     Cached
+  + exceptiongroup        1.3.1  pyhd8ed1ab_0           conda-forge       21kB
+  + icu                    78.2  h38cb7af_0             conda-forge     Cached
+  + iniconfig             2.3.0  pyhd8ed1ab_0           conda-forge       13kB
+  + libcxx               21.1.8  h55c6f16_2             conda-forge      570kB
+  + libexpat              2.7.4  hf6b4638_0             conda-forge     Cached
+  + libffi                3.5.2  hcf2aa1b_0             conda-forge     Cached
+  + libhwloc             2.12.2  default_ha3cc4f2_1000  conda-forge        2MB
+  + libiconv               1.18  h23cfdf5_2             conda-forge     Cached
+  + liblzma               5.8.2  h8088a28_0             conda-forge     Cached
+  + libsqlite            3.51.2  h1ae2325_0             conda-forge     Cached
+  + libxml2              2.15.1  h8d039ee_1             conda-forge       41kB
+  + libxml2-16           2.15.1  h5ef1a60_1             conda-forge      465kB
+  + libzlib               1.3.1  h8359307_2             conda-forge     Cached
+  + ncurses                 6.5  h5e97a16_3             conda-forge     Cached
+  + openssl               3.6.1  hd24854e_1             conda-forge     Cached
+  + packaging              26.0  pyhcf101f3_0           conda-forge     Cached
+  + perl                 5.32.1  7_h4614cfb_perl5       conda-forge     Cached
+  + pip                  26.0.1  pyh8b19718_0           conda-forge     Cached
+  + pluggy                1.6.0  pyhf9edf01_1           conda-forge       26kB
+  + pygments             2.19.2  pyhd8ed1ab_0           conda-forge     Cached
+  + pytest                9.0.2  pyhcf101f3_0           conda-forge      300kB
+  + python              3.11.14  h18782d2_3_cpython     conda-forge     Cached
+  + python_abi             3.11  8_cp311                conda-forge     Cached
+  + readline                8.3  h46df422_0             conda-forge     Cached
+  + setuptools           82.0.0  pyh332efcf_0           conda-forge     Cached
+  + tbb                2022.3.0  h4ddebb9_2             conda-forge      120kB
+  + tk                   8.6.13  h010d191_3             conda-forge     Cached
+  + tomli                 2.4.0  pyhcf101f3_0           conda-forge       21kB
+  + typing_extensions    4.15.0  pyhcf101f3_0           conda-forge       52kB
+  + tzdata                2025c  hc9c84f9_1             conda-forge     Cached
+  + wheel                0.46.3  pyhd8ed1ab_0           conda-forge     Cached
+  + zlib                  1.3.1  h8359307_2             conda-forge     Cached
+
+  Summary:
+
+  Install: 37 packages
+
+  Total download: 5MB
+
+────────────────────────────────────────────────────────────────────────────────
+
+
+
+Transaction starting
+Linking liblzma-5.8.2-h8088a28_0
+Linking libcxx-21.1.8-h55c6f16_2
+Linking libzlib-1.3.1-h8359307_2
+Linking perl-5.32.1-7_h4614cfb_perl5
+Linking ncurses-6.5-h5e97a16_3
+Linking bzip2-1.0.8-hd037594_8
+Linking libexpat-2.7.4-hf6b4638_0
+Linking libffi-3.5.2-hcf2aa1b_0
+Linking icu-78.2-h38cb7af_0
+Linking libiconv-1.18-h23cfdf5_2
+Linking tk-8.6.13-h010d191_3
+Linking zlib-1.3.1-h8359307_2
+Linking readline-8.3-h46df422_0
+Linking libsqlite-3.51.2-h1ae2325_0
+Linking libxml2-16-2.15.1-h5ef1a60_1
+Linking libxml2-2.15.1-h8d039ee_1
+Linking libhwloc-2.12.2-default_ha3cc4f2_1000
+Linking tbb-2022.3.0-h4ddebb9_2
+Linking python_abi-3.11-8_cp311
+Linking tzdata-2025c-hc9c84f9_1
+Linking ca-certificates-2026.1.4-hbd8a1cb_0
+Linking openssl-3.6.1-hd24854e_1
+Linking python-3.11.14-h18782d2_3_cpython
+Linking setuptools-82.0.0-pyh332efcf_0
+Linking packaging-26.0-pyhcf101f3_0
+Linking wheel-0.46.3-pyhd8ed1ab_0
+Linking pip-26.0.1-pyh8b19718_0
+Linking typing_extensions-4.15.0-pyhcf101f3_0
+Linking tomli-2.4.0-pyhcf101f3_0
+Linking pygments-2.19.2-pyhd8ed1ab_0
+Linking pluggy-1.6.0-pyhf9edf01_1
+Linking iniconfig-2.3.0-pyhd8ed1ab_0
+Linking colorama-0.4.6-pyhd8ed1ab_1
+Linking click-8.3.1-pyh8f84b5b_1
+Linking exceptiongroup-1.3.1-pyhd8ed1ab_0
+Linking pytest-9.0.2-pyhcf101f3_0
+Linking bowtie-1.3.1-py311h697f9a0_10
+
+Transaction finished
+
+
+To activate this environment, use:
+
+    micromamba activate probedesign
+
+Or to execute a single command in this environment, use:
+
+    micromamba run -n probedesign mycommand
+

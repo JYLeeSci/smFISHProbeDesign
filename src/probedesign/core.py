@@ -42,6 +42,10 @@ class ProbeDesignResult:
     template_name: str
     mask: Optional[List[int]] = None
     mask_strings: List[str] = field(default_factory=list)
+    bowtie_pseudogene_hits: Optional[List[int]] = None
+    bowtie_genome_hits: Optional[dict] = None
+    bowtie_pseudogene_raw: Optional[str] = None
+    bowtie_genome_raw: Optional[str] = None
 
 
 def calculate_badness(
@@ -215,6 +219,7 @@ def design_probes(
     genome_mask: bool = False,
     index_dir: Optional[str] = None,
     repeatmask_file: Optional[str] = None,
+    save_bowtie_raw: bool = False,
 ) -> ProbeDesignResult:
     """Design oligonucleotide probes for a target sequence.
 
@@ -291,6 +296,11 @@ def design_probes(
             full_mask[i] += v
         print(f"Repeat masking (from N's): {sum(rmask)} positions masked")
 
+    pseudo_raw_text = None
+    genome_raw_text = None
+    pseudo_hits = None
+    genome_hits_dict = None
+
     if pseudogene_mask or genome_mask:
         from .masking import (
             pseudogene_mask as get_pseudogene_mask,
@@ -302,7 +312,10 @@ def design_probes(
 
         if pseudogene_mask:
             try:
-                pmask = get_pseudogene_mask(seq, species, idx_dir)
+                pmask, pseudo_hits, pseudo_raw = get_pseudogene_mask(seq, species, idx_dir)
+                if not save_bowtie_raw:
+                    pseudo_raw = None
+                pseudo_raw_text = pseudo_raw
                 for i, v in enumerate(pmask):
                     full_mask[i] += v
                 # Create visualization string
@@ -314,7 +327,10 @@ def design_probes(
 
         if genome_mask:
             try:
-                gmask = get_genome_mask(seq, species, idx_dir)
+                gmask, genome_hits_dict, genome_raw = get_genome_mask(seq, species, idx_dir)
+                if not save_bowtie_raw:
+                    genome_raw = None
+                genome_raw_text = genome_raw
                 for i, v in enumerate(gmask):
                     full_mask[i] += v
                 # Create visualization string
@@ -360,6 +376,10 @@ def design_probes(
             template_name=output_name,
             mask=full_mask,
             mask_strings=mask_strings,
+            bowtie_pseudogene_hits=pseudo_hits,
+            bowtie_genome_hits=genome_hits_dict,
+            bowtie_pseudogene_raw=pseudo_raw_text,
+            bowtie_genome_raw=genome_raw_text,
         )
 
     # Use the solution with the most probes (last in list)
@@ -396,4 +416,8 @@ def design_probes(
         template_name=output_name,
         mask=full_mask,
         mask_strings=mask_strings,
+        bowtie_pseudogene_hits=pseudo_hits,
+        bowtie_genome_hits=genome_hits_dict,
+        bowtie_pseudogene_raw=pseudo_raw_text,
+        bowtie_genome_raw=genome_raw_text,
     )
