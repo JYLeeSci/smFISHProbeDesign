@@ -26,6 +26,7 @@ class Probe:
     """Represents a designed oligonucleotide probe."""
     index: int           # 1-based probe number
     position: int        # 0-based start position in template
+    length: int          # Probe length in bp
     sequence: str        # Probe sequence (reverse complement of template)
     gc_percent: float    # GC content as percentage (0-100)
     tm: float            # Melting temperature (°C)
@@ -98,6 +99,73 @@ def calculate_badness(
         badness.append((gibbs - target_gibbs) ** 2)
 
     return badness
+
+
+def calculate_badness_mixed(
+    seq: str,
+    min_len: int,
+    max_len: int,
+    target_gibbs: float,
+    allowable_range: Tuple[float, float],
+) -> List[List[float]]:
+    """Calculate badness scores for mixed-length probes.
+
+    For each position, calculates badness for every probe length in
+    [min_len, max_len]. This enables the mixed-length DP to consider
+    all valid lengths at each position.
+
+    Args:
+        seq: Input sequence (lowercase)
+        min_len: Minimum probe length
+        max_len: Maximum probe length
+        target_gibbs: Target Gibbs free energy (kcal/mol)
+        allowable_range: Tuple of (min_gibbs, max_gibbs) for valid probes
+
+    Returns:
+        2D list: badness_2d[pos][len_idx] where len_idx = L - min_len.
+        Length of outer list = len(seq) - min_len + 1.
+        Length of inner list = max_len - min_len + 1.
+    """
+    min_gibbs, max_gibbs = sorted(allowable_range)
+    max_goodlen = len(seq) - min_len + 1
+    n_lengths = max_len - min_len + 1
+    badness_2d = []
+
+    for i in range(max_goodlen):
+        row = []
+        for L_idx in range(n_lengths):
+            L = min_len + L_idx
+
+            # Check if probe would extend past sequence end
+            if i + L > len(seq):
+                row.append(float('inf'))
+                continue
+
+            oligo = seq[i:i + L]
+
+            # Check for invalid/masked characters
+            if has_invalid_chars(oligo):
+                row.append(float('inf'))
+                continue
+
+            # Calculate Gibbs free energy
+            try:
+                gibbs = gibbs_rna_dna(oligo)
+            except KeyError:
+                row.append(float('inf'))
+                continue
+
+            # Check if within allowable range
+            if gibbs < min_gibbs or gibbs > max_gibbs:
+                row.append(float('inf'))
+                continue
+
+            # Badness is squared distance from target
+            row.append((gibbs - target_gibbs) ** 2)
+
+        badness_2d.append(row)
+
+    return badness_2d
 
 
 def _calc_score(old_score: float, k: int, new_badness: float) -> float:
@@ -206,6 +274,104 @@ def find_best_probes(
     return results
 
 
+def find_best_probes_mixed(
+    badness_2d: List[List[float]],
+    seq_len: int,
+    min_len: int,
+    max_len: int,
+    spacer_len: int,
+    n_probes: int,
+) -> List[Tuple[float, List[Tuple[int, int]]]]:
+    """Find optimal probe positions with mixed-length probes using DP.
+
+    Uses an end-position-indexed DP to handle variable-length probes.
+    The DP considers all valid lengths at every position and finds the
+    globally optimal combination of probe placements and lengths.
+
+    State: dp[e][k] = best average badness for k+1 probes with last probe
+    ending at or before position e.
+
+    Args:
+        badness_2d: 2D badness array [pos][len_idx] from calculate_badness_mixed()
+        seq_len: Length of input sequence
+        min_len: Minimum probe length
+        max_len: Maximum probe length
+        spacer_len: Minimum gap between probes
+        n_probes: Maximum number of probes to find
+
+    Returns:
+        List of (score, [(start, length), ...]) tuples for 1..n_probes solutions.
+    """
+    n_lengths = max_len - min_len + 1
+    max_goodlen = len(badness_2d)  # number of valid start positions
+
+    # DP indexed by end position (0..seq_len-1)
+    # dp[e][k] = best average badness for k+1 probes ending at or before e
+    dp = [[float('inf')] * n_probes for _ in range(seq_len)]
+    # tracker[e][k] = (start_pos, length) of the last probe in best solution
+    tracker = [[None] * n_probes for _ in range(seq_len)]
+
+    for e in range(seq_len):
+        # Step 1: Propagate from previous end position
+        if e > 0:
+            for k in range(n_probes):
+                if dp[e - 1][k] < dp[e][k]:
+                    dp[e][k] = dp[e - 1][k]
+                    tracker[e][k] = tracker[e - 1][k]
+
+        # Step 2: Try placing a probe ending at exactly position e
+        for L_idx in range(n_lengths):
+            L = min_len + L_idx
+            x = e - L + 1  # start position
+            if x < 0 or x >= max_goodlen:
+                continue
+            b = badness_2d[x][L_idx]
+            if b == float('inf'):
+                continue
+
+            for k in range(n_probes):
+                if k == 0:
+                    score = b
+                else:
+                    prev_end = x - spacer_len - 1
+                    if prev_end < 0 or tracker[prev_end][k - 1] is None:
+                        continue
+                    score = _calc_score(dp[prev_end][k - 1], k, b)
+
+                if score < dp[e][k]:
+                    dp[e][k] = score
+                    tracker[e][k] = (x, L)
+
+    # Backtrack to find probe positions for each number of probes
+    results = []
+    for k in range(n_probes):
+        e = seq_len - 1
+
+        if tracker[e][k] is None:
+            continue
+
+        score = dp[e][k]
+
+        # Only include solutions with reasonable scores
+        if score >= 1_000_000:
+            continue
+
+        positions_and_lengths = []
+        curr_k = k
+        for _ in range(k + 1):
+            if tracker[e][curr_k] is None:
+                break
+            x, L = tracker[e][curr_k]
+            positions_and_lengths.append((x, L))
+            e = x - spacer_len - 1
+            curr_k -= 1
+
+        positions_and_lengths.reverse()
+        results.append((score, positions_and_lengths))
+
+    return results
+
+
 def design_probes(
     input_file: str,
     n_probes: int = 48,
@@ -220,6 +386,7 @@ def design_probes(
     index_dir: Optional[str] = None,
     repeatmask_file: Optional[str] = None,
     save_bowtie_raw: bool = False,
+    mixed_lengths: Optional[Tuple[int, int]] = None,
 ) -> ProbeDesignResult:
     """Design oligonucleotide probes for a target sequence.
 
@@ -229,7 +396,8 @@ def design_probes(
     Args:
         input_file: Path to input FASTA file
         n_probes: Number of probes to design (default 48)
-        oligo_length: Length of each oligonucleotide (default 20)
+        oligo_length: Length of each oligonucleotide (default 20, used when
+            mixed_lengths is None)
         spacer_length: Minimum gap between probes (default 2)
         target_gibbs: Target Gibbs free energy in kcal/mol (default -23)
         allowable_gibbs: (min, max) Gibbs FE range (default (-26, -20))
@@ -238,10 +406,21 @@ def design_probes(
         pseudogene_mask: Whether to mask pseudogene alignments (default: False)
         genome_mask: Whether to mask repetitive genomic regions (default: False)
         index_dir: Directory containing bowtie indexes (default: auto-detect)
+        repeatmask_file: Path to repeatmask FASTA file (default: None)
+        save_bowtie_raw: Whether to save raw bowtie output (default: False)
+        mixed_lengths: Optional (min_len, max_len) tuple for mixed-length
+            probe design. When provided, probes of varying lengths within
+            this range are considered. When None, uses fixed oligo_length.
 
     Returns:
         ProbeDesignResult containing the designed probes
     """
+    use_mixed = mixed_lengths is not None
+    if use_mixed:
+        min_len, max_len = mixed_lengths
+    else:
+        min_len = max_len = oligo_length
+
     # Read input sequence
     headers, seqs = read_fasta(input_file)
 
@@ -259,15 +438,18 @@ def design_probes(
         output_name = get_basename(input_file)
 
     # Calculate badness scores (thermodynamic filtering)
-    badness = calculate_badness(
-        seq, oligo_length, target_gibbs, allowable_gibbs
-    )
-
-    # Create F mask from initial badness==inf (thermodynamic filtering)
-    # This is done BEFORE adding masking, matching MATLAB behavior
-    # F shows positions where you CANNOT start a probe (badness==inf or past end)
-    # This matches MATLAB mask_string(inseq, badness==inf, 'F')
-    goodlen = len(badness)
+    if use_mixed:
+        badness_2d = calculate_badness_mixed(
+            seq, min_len, max_len, target_gibbs, allowable_gibbs
+        )
+        # For F mask: position is valid if ANY length gives finite badness
+        max_goodlen = len(badness_2d)
+        n_lengths = max_len - min_len + 1
+    else:
+        badness = calculate_badness(
+            seq, oligo_length, target_gibbs, allowable_gibbs
+        )
+        goodlen = len(badness)
 
     # Apply masking if requested
     full_mask = [0] * len(seq)
@@ -305,7 +487,6 @@ def design_probes(
         from .masking import (
             pseudogene_mask as get_pseudogene_mask,
             genome_mask as get_genome_mask,
-            mask_to_badness,
         )
 
         idx_dir = Path(index_dir) if index_dir else None
@@ -340,33 +521,60 @@ def design_probes(
             except Exception as e:
                 print(f"Warning: Genome masking failed: {e}")
 
-    # Add F mask string (thermodynamic filtering - from badness==inf BEFORE masking)
-    # This matches MATLAB line 300: maskseqs = [maskseqs mask_string(inseq,badness==inf,'F')];
-    # Show 'F' at position i if:
-    #   - badness[i] == inf (can't start probe due to invalid chars or out-of-range Gibbs)
-    #   - i >= goodlen (past the last valid probe start position)
-    # Show sequence character at position i if badness[i] is finite (valid probe start)
-    fstr_parts = []
-    for i in range(len(seq)):
-        if i < goodlen and badness[i] != float('inf'):
-            fstr_parts.append(seq[i])
-        else:
-            fstr_parts.append('F')
-    fstr = "".join(fstr_parts)
-    mask_strings.append(fstr)
+    # Create F mask and apply masking to badness
+    if use_mixed:
+        # F mask for mixed-length: show 'F' only if NO length gives finite badness
+        fstr_parts = []
+        for i in range(len(seq)):
+            valid_for_any = False
+            if i < max_goodlen:
+                for L_idx in range(n_lengths):
+                    if badness_2d[i][L_idx] != float('inf'):
+                        valid_for_any = True
+                        break
+            if valid_for_any:
+                fstr_parts.append(seq[i])
+            else:
+                fstr_parts.append('F')
+        fstr = "".join(fstr_parts)
+        mask_strings.append(fstr)
 
-    # Add mask to badness (after F mask is created)
-    if any(full_mask):
-        from .masking import mask_to_badness
-        mask_badness = mask_to_badness(full_mask, oligo_length)
-        for i in range(len(badness)):
-            if mask_badness[i] == float('inf'):
-                badness[i] = float('inf')
+        # Apply mask to 2D badness (after F mask is created)
+        if any(full_mask):
+            from .masking import mask_to_badness_mixed
+            mask_bad_2d = mask_to_badness_mixed(full_mask, min_len, max_len)
+            for i in range(len(badness_2d)):
+                for L_idx in range(n_lengths):
+                    if i < len(mask_bad_2d) and mask_bad_2d[i][L_idx] == float('inf'):
+                        badness_2d[i][L_idx] = float('inf')
 
-    # Find optimal probe positions
-    solutions = find_best_probes(
-        badness, len(seq), oligo_length, spacer_length, n_probes
-    )
+        # Find optimal probe positions using mixed-length DP
+        solutions = find_best_probes_mixed(
+            badness_2d, len(seq), min_len, max_len, spacer_length, n_probes
+        )
+    else:
+        # F mask for fixed-length (original behavior)
+        fstr_parts = []
+        for i in range(len(seq)):
+            if i < goodlen and badness[i] != float('inf'):
+                fstr_parts.append(seq[i])
+            else:
+                fstr_parts.append('F')
+        fstr = "".join(fstr_parts)
+        mask_strings.append(fstr)
+
+        # Apply mask to badness (after F mask is created)
+        if any(full_mask):
+            from .masking import mask_to_badness
+            mask_badness = mask_to_badness(full_mask, oligo_length)
+            for i in range(len(badness)):
+                if mask_badness[i] == float('inf'):
+                    badness[i] = float('inf')
+
+        # Find optimal probe positions using fixed-length DP
+        solutions = find_best_probes(
+            badness, len(seq), oligo_length, spacer_length, n_probes
+        )
 
     if not solutions:
         return ProbeDesignResult(
@@ -383,31 +591,58 @@ def design_probes(
         )
 
     # Use the solution with the most probes (last in list)
-    best_score, positions = solutions[-1]
+    best_solution = solutions[-1]
 
     # Generate probe objects
     probes = []
-    for i, pos in enumerate(positions):
-        # Extract template region, skipping '>' characters
-        template_region = ""
-        j = pos
-        while len(template_region) < oligo_length and j < len(seq):
-            if seq[j] != '>':
-                template_region += seq[j]
-            j += 1
+    if use_mixed:
+        best_score, positions_and_lengths = best_solution
+        for i, (pos, probe_len) in enumerate(positions_and_lengths):
+            # Extract template region, skipping '>' characters
+            template_region = ""
+            j = pos
+            while len(template_region) < probe_len and j < len(seq):
+                if seq[j] != '>':
+                    template_region += seq[j]
+                j += 1
 
-        probe_seq = reverse_complement(template_region)
+            probe_seq = reverse_complement(template_region)
 
-        probe = Probe(
-            index=i + 1,
-            position=pos,
-            sequence=probe_seq,
-            gc_percent=round(percent_gc(probe_seq) * 100),
-            tm=round(tm_rna_dna(template_region), 1),
-            gibbs_fe=round(gibbs_rna_dna(template_region), 1),
-            name=f"{output_name}_{i + 1}",
-        )
-        probes.append(probe)
+            probe = Probe(
+                index=i + 1,
+                position=pos,
+                length=len(probe_seq),
+                sequence=probe_seq,
+                gc_percent=round(percent_gc(probe_seq) * 100),
+                tm=round(tm_rna_dna(template_region), 1),
+                gibbs_fe=round(gibbs_rna_dna(template_region), 1),
+                name=f"{output_name}_{i + 1}",
+            )
+            probes.append(probe)
+    else:
+        best_score, positions = best_solution
+        for i, pos in enumerate(positions):
+            # Extract template region, skipping '>' characters
+            template_region = ""
+            j = pos
+            while len(template_region) < oligo_length and j < len(seq):
+                if seq[j] != '>':
+                    template_region += seq[j]
+                j += 1
+
+            probe_seq = reverse_complement(template_region)
+
+            probe = Probe(
+                index=i + 1,
+                position=pos,
+                length=len(probe_seq),
+                sequence=probe_seq,
+                gc_percent=round(percent_gc(probe_seq) * 100),
+                tm=round(tm_rna_dna(template_region), 1),
+                gibbs_fe=round(gibbs_rna_dna(template_region), 1),
+                name=f"{output_name}_{i + 1}",
+            )
+            probes.append(probe)
 
     return ProbeDesignResult(
         probes=probes,

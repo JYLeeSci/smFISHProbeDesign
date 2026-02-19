@@ -74,11 +74,39 @@ with st.sidebar:
         min_value=1, max_value=200, value=48, step=1,
         key="n_probes",
     )
-    oligo_length = st.number_input(
-        "Oligo length (bp)",
-        min_value=10, max_value=100, value=20, step=1,
-        key="oligo_length",
+    oligo_mode = st.radio(
+        "Oligo length mode",
+        ["Fixed", "Mixed range"],
+        key="oligo_mode",
+        horizontal=True,
+        help="Fixed: all probes same length. Mixed range: probes vary between min-max length.",
     )
+
+    mixed_lengths = None
+    if oligo_mode == "Fixed":
+        oligo_length = st.number_input(
+            "Oligo length (bp)",
+            min_value=10, max_value=60, value=20, step=1,
+            key="oligo_length",
+        )
+    else:
+        ocol1, ocol2 = st.columns(2)
+        with ocol1:
+            mixed_min = st.number_input(
+                "Min length (bp)",
+                min_value=10, max_value=60, value=18, step=1,
+                key="mixed_min",
+            )
+        with ocol2:
+            mixed_max = st.number_input(
+                "Max length (bp)",
+                min_value=10, max_value=60, value=22, step=1,
+                key="mixed_max",
+            )
+        if mixed_min >= mixed_max:
+            st.warning("Min length must be less than max length.")
+        oligo_length = mixed_min
+        mixed_lengths = (mixed_min, mixed_max)
     spacer_length = st.number_input(
         "Spacer length (bp)",
         min_value=0, max_value=20, value=2, step=1,
@@ -241,15 +269,20 @@ def _show_single_results():
         # Probes table
         st.subheader("Designed Probes")
         probe_data = []
+        probe_lengths = set(len(p.sequence) for p in result.probes)
+        show_length = len(probe_lengths) > 1
         for p in result.probes:
-            probe_data.append({
-                "Index": p.index,
+            row = {"Index": p.index}
+            if show_length:
+                row["Length"] = len(p.sequence)
+            row.update({
                 "GC%": p.gc_percent,
                 "Tm": p.tm,
                 "Gibbs FE": p.gibbs_fe,
                 "Sequence": p.sequence,
                 "Name": p.name,
             })
+            probe_data.append(row)
         df = pd.DataFrame(probe_data)
         st.dataframe(df, width='stretch', hide_index=True)
 
@@ -411,6 +444,7 @@ if mode == "Single sequence":
                 repeatmask_mode=rm_mode_key,
                 repeatmask_file=rm_file,
                 save_bowtie_raw=save_bowtie_raw,
+                mixed_lengths=mixed_lengths,
             )
 
         st.session_state["single_result"] = run_result
@@ -515,6 +549,7 @@ else:
             "repeatmask_mode": rm_mode_key,
             "repeatmask_file": rm_file,
             "save_bowtie_raw": save_bowtie_raw,
+            "mixed_lengths": mixed_lengths,
         }
 
         # Run batch with progress
@@ -581,16 +616,20 @@ else:
         for idx, br in enumerate(batch_results):
             if br.result is not None and br.result.probes:
                 with st.expander(f"{br.filename} — {br.n_probes_found} probes (score: {br.score:.4f})"):
-                    probe_data = [
-                        {
-                            "Index": p.index,
+                    br_lengths = set(len(p.sequence) for p in br.result.probes)
+                    br_show_length = len(br_lengths) > 1
+                    probe_data = []
+                    for p in br.result.probes:
+                        row = {"Index": p.index}
+                        if br_show_length:
+                            row["Length"] = len(p.sequence)
+                        row.update({
                             "GC%": p.gc_percent,
                             "Tm": p.tm,
                             "Gibbs FE": p.gibbs_fe,
                             "Sequence": p.sequence,
-                        }
-                        for p in br.result.probes
-                    ]
+                        })
+                        probe_data.append(row)
                     st.dataframe(
                         pd.DataFrame(probe_data),
                         width='stretch',

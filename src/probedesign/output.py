@@ -70,7 +70,6 @@ def write_seq_file(
         line_width: Characters per line for wrapping
     """
     seq = result.input_sequence
-    oligo_len = len(result.probes[0].sequence) if result.probes else 20
 
     # Build probe alignment string
     probe_align = [' '] * len(seq)
@@ -78,6 +77,7 @@ def write_seq_file(
 
     for probe in result.probes:
         pos = probe.position
+        oligo_len = len(probe.sequence)
         # Get the actual sequence at this position (skip '>' characters)
         actual_seq = ''
         seq_pos = pos

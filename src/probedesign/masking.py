@@ -374,6 +374,44 @@ def mask_to_badness(
     return badness
 
 
+def mask_to_badness_mixed(
+    mask: List[int],
+    min_len: int,
+    max_len: int,
+) -> List[List[float]]:
+    """Convert a mask to 2D badness scores for mixed-length probe design.
+
+    For each position and each candidate probe length, checks whether the
+    probe would overlap any masked position. If so, that (position, length)
+    pair gets infinite badness.
+
+    Args:
+        mask: Binary mask (1 = masked)
+        min_len: Minimum probe length
+        max_len: Maximum probe length
+
+    Returns:
+        2D list: badness[pos][len_idx] where len_idx = L - min_len.
+        Length of outer list = len(mask) - min_len + 1.
+        Length of inner list = max_len - min_len + 1.
+    """
+    max_goodlen = len(mask) - min_len + 1
+    n_lengths = max_len - min_len + 1
+    badness = []
+
+    for i in range(max_goodlen):
+        row = [0.0] * n_lengths
+        for L_idx in range(n_lengths):
+            L = min_len + L_idx
+            if i + L > len(mask):
+                row[L_idx] = float('inf')
+            elif any(mask[i:i + L]):
+                row[L_idx] = float('inf')
+        badness.append(row)
+
+    return badness
+
+
 def create_full_mask(
     seq: str,
     species: str = "human",

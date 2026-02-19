@@ -24,9 +24,9 @@ def main():
 )
 @click.option(
     '-l', '--oligo-length',
-    default=20,
-    type=int,
-    help='Length of each oligonucleotide (default: 20)'
+    default='20',
+    type=str,
+    help='Oligo length: single int (e.g. 20) or range for mixed lengths (e.g. 18-22)'
 )
 @click.option(
     '-s', '--spacer-length',
@@ -99,7 +99,7 @@ def main():
 def design(
     input_file: str,
     n_probes: int,
-    oligo_length: int,
+    oligo_length: str,
     spacer_length: int,
     target_gibbs: float,
     allowable_gibbs: str,
@@ -136,6 +136,46 @@ def design(
             "Expected format: min,max (e.g., -26,-20)"
         )
 
+    # Parse oligo length: single int or range (e.g. "20" or "18-22")
+    mixed_lengths = None
+    parsed_oligo_length = 20  # default
+    oligo_length_str = oligo_length.strip()
+    if '-' in oligo_length_str:
+        parts = oligo_length_str.split('-')
+        if len(parts) == 2:
+            try:
+                lo, hi = int(parts[0]), int(parts[1])
+                if lo > hi:
+                    raise click.BadParameter(
+                        f"Invalid range for --oligo-length: {oligo_length_str}. "
+                        "Min must be <= max (e.g., 18-22)"
+                    )
+                if lo < 10 or hi > 60:
+                    raise click.BadParameter(
+                        f"Invalid range for --oligo-length: {oligo_length_str}. "
+                        "Values must be between 10 and 60"
+                    )
+                mixed_lengths = (lo, hi)
+                parsed_oligo_length = lo  # fallback; not used in mixed mode
+            except ValueError:
+                raise click.BadParameter(
+                    f"Invalid format for --oligo-length: {oligo_length_str}. "
+                    "Expected integer or range (e.g., 20 or 18-22)"
+                )
+        else:
+            raise click.BadParameter(
+                f"Invalid format for --oligo-length: {oligo_length_str}. "
+                "Expected integer or range (e.g., 20 or 18-22)"
+            )
+    else:
+        try:
+            parsed_oligo_length = int(oligo_length_str)
+        except ValueError:
+            raise click.BadParameter(
+                f"Invalid format for --oligo-length: {oligo_length_str}. "
+                "Expected integer or range (e.g., 20 or 18-22)"
+            )
+
     # Determine output prefix
     if output is None:
         output = Path(input_file).stem
@@ -163,12 +203,15 @@ def design(
 
     # Run probe design
     if not quiet:
-        click.echo(f"Designing probes for {input_file}...")
+        if mixed_lengths:
+            click.echo(f"Designing mixed-length probes ({mixed_lengths[0]}-{mixed_lengths[1]}bp) for {input_file}...")
+        else:
+            click.echo(f"Designing probes for {input_file}...")
 
     result = design_probes(
         input_file=input_file,
         n_probes=n_probes,
-        oligo_length=oligo_length,
+        oligo_length=parsed_oligo_length,
         spacer_length=spacer_length,
         target_gibbs=target_gibbs,
         allowable_gibbs=(min_gibbs, max_gibbs),
@@ -179,6 +222,7 @@ def design(
         index_dir=index_dir,
         repeatmask_file=actual_repeatmask_file,
         save_bowtie_raw=save_bowtie_raw,
+        mixed_lengths=mixed_lengths,
     )
 
     if not result.probes:

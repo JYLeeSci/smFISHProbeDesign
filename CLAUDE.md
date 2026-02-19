@@ -8,6 +8,8 @@ ProbeDesign is a tool for designing oligonucleotide probes for single molecule R
 
 **Key goal**: The Python implementation should produce **identical results** to the MATLAB reference implementation (`probedesign/findprobesLocal.m`).
 
+For python implementation remember to use the user's virtual environment and search for micromamba, mamba or conda probedesign environment, and avoid installing python packages to user's base CLI environment. 
+
 ## Architecture
 
 ### Python Package (`src/probedesign/`)
@@ -15,12 +17,49 @@ ProbeDesign is a tool for designing oligonucleotide probes for single molecule R
 | File | Purpose |
 |------|---------|
 | `cli.py` | Click-based command-line interface |
-| `core.py` | Main probe design algorithm (badness calculation, DP optimization) |
+| `core.py` | Main probe design algorithm (badness calculation, DP optimization, mixed-length support) |
 | `thermodynamics.py` | Gibbs free energy and melting temperature calculations (Sugimoto 1995 params) |
-| `masking.py` | Bowtie-based sequence masking (pseudogene, genome) + RepeatMasker integration |
+| `masking.py` | Bowtie-based sequence masking (pseudogene, genome), RepeatMasker integration, mixed-length mask support |
 | `sequence.py` | Sequence utilities (reverse complement, GC%, validation) |
 | `fasta.py` | FASTA file I/O with junction marker handling |
 | `output.py` | Output file generation (_oligos.txt, _seq.txt) |
+
+### Streamlit App (`streamlit_app/`)
+
+| File | Purpose |
+|------|---------|
+| `app.py` | Main Streamlit UI — sidebar parameters, single/batch mode panels, result display |
+| `utils.py` | Backend helpers — FASTA validation, `run_design()` wrapper, `run_batch()` runner, prerequisite checks |
+| `README.md` | End-user installation and usage guide |
+
+**Running the app**:
+```bash
+cd streamlit_app
+streamlit run app.py
+```
+
+**Features**:
+- **Single sequence mode**: Upload or paste a FASTA file, design probes interactively
+- **Batch mode**: Process multiple FASTA files from a directory or upload, write results to an output directory
+- **Mixed-length support**: Toggle "Mixed range" in sidebar to use variable-length probes (e.g., 18-22bp)
+- **Masking options**: Pseudogene mask, genome mask, RepeatMasker (auto or file)
+- **Downloads**: `_oligos.txt`, `_seq.txt`, bowtie hit files, batch summary TSV
+
+**Parameter flow**:
+```
+Sidebar UI (app.py) → run_design() (utils.py) → design_probes() (core.py)
+Sidebar UI (app.py) → run_batch() (utils.py) → run_design() per file → design_probes()
+```
+
+**Key functions in `utils.py`**:
+
+| Function | Purpose |
+|----------|---------|
+| `run_design()` | Wraps `design_probes()` with stdout capture, RepeatMasker auto-execution, error handling |
+| `run_batch()` | Iterates FASTA files, calls `run_design()` per file, writes output files, tracks progress |
+| `check_prerequisites()` | Verifies bowtie, RepeatMasker, and index files are available |
+| `validate_fasta_text()` | Validates pasted FASTA format (headers, valid bases) |
+| `clean_name_for_prefix()` | Converts filenames/headers to clean output name prefixes |
 
 ### MATLAB Code (`probedesign/`)
 
@@ -34,13 +73,13 @@ ProbeDesign is a tool for designing oligonucleotide probes for single molecule R
 ## Algorithm
 
 1. **Read input**: Parse FASTA, concatenate multi-entry files with `>` junction markers
-2. **Calculate badness**: For each position, compute `(gibbs - target)^2`. Positions with invalid chars or out-of-range Gibbs get `inf` badness.
+2. **Calculate badness**: For each position, compute `(gibbs - target)^2`. Positions with invalid chars or out-of-range Gibbs get `inf` badness. In mixed-length mode (`-l 18-22`), badness is calculated for each (position, length) pair as a 2D table.
 3. **Apply masking**:
    - R mask: Repeat regions (from N's in input or separate repeatmask file)
    - P mask: Pseudogene alignments (bowtie to pseudogene DBs)
    - B mask: Genome alignments (bowtie to genome with multiple stringencies)
    - F mask: Thermodynamic filtering (badness == inf)
-4. **Dynamic programming**: Find optimal probe placements minimizing average badness
+4. **Dynamic programming**: Find optimal probe placements minimizing average badness. Fixed-length mode uses start-position DP; mixed-length mode uses end-position DP to handle variable probe spacing.
 5. **Generate output**: Create oligo and sequence alignment files
 
 ## Output Format
@@ -64,6 +103,7 @@ Visual alignment showing:
 | `CDKN1A_32/` | 32 probes, automatic RepeatMasker (`--repeatmask`) | 100% |
 | `KRT19_withUTRs/` | 6 probes, pseudogene + genome masking | 100% |
 | `EIF1_CDS_HCR/` | HCR probes (52bp oligos) | ~78% (partial expected) |
+| `mixed_length_test/` | Synthetic GC-variable sequence for mixed-length testing | N/A (new feature) |
 
 ### Running Tests
 
@@ -93,6 +133,13 @@ probedesign design test_cases/KRT19_withUTRs/KRT19_withUTRs.fa --probes 32 \
 probedesign design test_cases/EIF1_CDS_HCR/EIF1_Exons.fasta --probes 20 \
   -l 52 --target-gibbs -60 --allowable-gibbs -80,-40 \
   --pseudogene-mask --genome-mask --index-dir bowtie_indexes
+
+# Test 5: Mixed-length probes on CDKN1A
+probedesign design test_cases/CDKN1A_32/CDKN1A.fa --probes 48 \
+  --repeatmask-file test_cases/CDKN1A_32/CDKN1A_repeatmasked.fa -l 18-22
+
+# Test 6: Mixed-length on synthetic GC-variable sequence
+probedesign design test_cases/mixed_length_test/mixed_gc.fa --probes 20 -l 18-22
 ```
 
 ## Important Implementation Details
@@ -111,6 +158,39 @@ The F mask shows thermodynamic filtering - positions where a probe **cannot star
 - Sequence char at position i if `badness[i]` is finite (valid probe start)
 
 This matches MATLAB `mask_string(inseq, badness==inf, 'F')`.
+
+### Mixed-Length Probe Design
+
+Allows probes of varying lengths (e.g., 18-22bp) instead of a single fixed length. This increases probe count on sequences with variable GC content, where GC-rich regions need shorter probes and AT-rich regions need longer probes to meet the Gibbs FE target.
+
+**CLI usage**:
+```bash
+# Fixed length (default, backward compatible)
+probedesign design input.fa -l 20
+
+# Mixed length range
+probedesign design input.fa -l 18-22
+```
+
+**Streamlit app**: Select "Mixed range" under "Oligo length mode" in the sidebar, then set min/max lengths (e.g., 18 and 22).
+
+**How it works**:
+1. `calculate_badness_mixed()` builds a 2D table `badness[pos][len_idx]` for all positions and all candidate lengths
+2. `find_best_probes_mixed()` uses an end-position DP (`dp[e][k]` = best score for k+1 probes ending at or before position e) to handle variable spacing between probes of different lengths
+3. The DP considers ALL valid lengths at every position and finds the globally optimal combination
+4. The same `target_gibbs` and `allowable_gibbs` are used for all lengths (ensures similar binding thermodynamics)
+
+**Key functions**:
+
+| Function | File | Purpose |
+|----------|------|---------|
+| `calculate_badness_mixed()` | `core.py` | 2D badness table for all (position, length) pairs |
+| `find_best_probes_mixed()` | `core.py` | End-position DP for variable-length probe placement |
+| `mask_to_badness_mixed()` | `masking.py` | Convert position-level mask to 2D probe-level badness |
+
+**F mask in mixed-length mode**: A position shows 'F' only if NO length in the range produces a valid probe (all lengths give `inf` badness).
+
+**Backward compatibility**: When `-l 20` (single integer) is used, the original fixed-length code path runs unchanged. The mixed-length code is only activated by range syntax (`-l 18-22`).
 
 ### Junction Handling
 
