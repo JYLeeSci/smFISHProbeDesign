@@ -23,6 +23,7 @@ from utils import (
     discover_fasta_files,
     format_batch_summary,
     write_batch_summary,
+    package_batch_results_zip,
     BatchResult,
     clean_name_for_prefix,
     extract_first_fasta_header,
@@ -66,7 +67,7 @@ with st.sidebar:
         horizontal=True,
     )
 
-    st.divider()
+    st.write("")
 
     # Basic parameters
     n_probes = st.number_input(
@@ -465,7 +466,7 @@ else:
     # Input method
     input_method = st.radio(
         "Input method",
-        ["Directory path", "Upload files"],
+        ["Upload files", "Directory path"],
         key="batch_input_method",
         horizontal=True,
     )
@@ -478,6 +479,7 @@ else:
             "Directory containing .fa/.fasta files",
             key="batch_input_dir",
         )
+        st.caption("Input filesystem path. Use 'Upload files' if connecting remotely.")
     else:
         uploaded_files = st.file_uploader(
             "Upload FASTA files",
@@ -486,12 +488,16 @@ else:
             key="batch_upload",
         )
 
-    # Output directory
-    batch_output_dir = st.text_input(
-        "Output directory",
-        value=str(Path.home() / "Desktop" / "probedesign_output"),
-        key="batch_output_dir_input",
-    )
+    # Output directory — optional, for server-side power users
+    with st.expander("Auto-save outputs to Local/Server directory (optional)", expanded=False):
+        st.caption("Leave blank to download results as a ZIP file (recommended for remote access).")
+        batch_output_dir = st.text_input(
+            "Output directory path on server",
+            value="",
+            key="batch_output_dir_input",
+        )
+    
+    st.write("")
 
     # Gibbs range validation
     if gibbs_min >= gibbs_max:
@@ -566,18 +572,19 @@ else:
 
         batch_results = run_batch(
             fasta_paths=fasta_paths,
-            output_dir=batch_output_dir,
+            output_dir=batch_output_dir.strip() or None,
             params=params,
             progress_callback=_progress_cb,
             name_overrides=batch_name_overrides if batch_name_overrides else None,
         )
 
-        # Write summary file
-        write_batch_summary(batch_results, batch_output_dir)
+        # Write summary file to disk only if a server directory was specified
+        if batch_output_dir.strip():
+            write_batch_summary(batch_results, batch_output_dir)
 
         progress_bar.progress(1.0, text="Batch complete!")
         st.session_state["batch_results"] = batch_results
-        st.session_state["batch_output_dir"] = batch_output_dir
+        st.session_state["batch_output_dir"] = batch_output_dir.strip() or None
 
     # Always render batch results if available
     batch_results = st.session_state.get("batch_results")
@@ -599,18 +606,29 @@ else:
         df = pd.DataFrame(summary_data)
         st.dataframe(df, width='stretch', hide_index=True)
 
-        # Summary download
-        summary_text = format_batch_summary(batch_results)
-        st.download_button(
-            "Download batch_summary.tsv",
-            data=summary_text,
-            file_name="batch_summary.tsv",
-            mime="text/tab-separated-values",
-            key="dl_batch_summary",
-        )
+        # Summary download buttons
+        zip_bytes = package_batch_results_zip(batch_results)
+        dcol1, dcol2 = st.columns(2)
+        with dcol1:
+            st.download_button(
+                "Download all results (.zip)",
+                data=zip_bytes,
+                file_name="probedesign_batch_results.zip",
+                mime="application/zip",
+                key="dl_batch_zip",
+            )
+        with dcol2:
+            summary_text = format_batch_summary(batch_results)
+            st.download_button(
+                "Download batch_summary.tsv",
+                data=summary_text,
+                file_name="batch_summary.tsv",
+                mime="text/tab-separated-values",
+                key="dl_batch_summary",
+            )
 
         if saved_output_dir:
-            st.info(f"Output files written to: {saved_output_dir}")
+            st.info(f"Output files also written to server: {saved_output_dir}")
 
         # Per-file expandable details
         for idx, br in enumerate(batch_results):

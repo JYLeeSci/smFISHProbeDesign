@@ -4,6 +4,7 @@ import io
 import os
 import re
 import tempfile
+import zipfile
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -375,25 +376,33 @@ def discover_fasta_files(directory: str) -> List[Path]:
 
 def run_batch(
     fasta_paths: List[Path],
-    output_dir: str,
-    params: dict,
+    output_dir: Optional[str] = None,
+    params: dict = None,
     progress_callback: Optional[Callable] = None,
     name_overrides: Optional[Dict[Path, str]] = None,
 ) -> List[BatchResult]:
     """Run probe design on a list of FASTA files.
 
-    Writes output files to output_dir for each successful run.
+    Optionally writes output files to output_dir for each successful run.
+    If output_dir is None, results are only held in memory (retrieve via
+    package_batch_results_zip).
 
     Args:
         fasta_paths: List of FASTA file paths to process
-        output_dir: Directory for output files
+        output_dir: Optional server-side directory for output files. When None,
+            no files are written to disk.
         params: Dict of design parameters (passed to run_design)
         progress_callback: Optional callable(current_index, total, filename)
 
     Returns:
         List of BatchResult for summary table.
     """
-    os.makedirs(output_dir, exist_ok=True)
+    if params is None:
+        params = {}
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
     batch_results = []
 
     for i, fasta_path in enumerate(fasta_paths):
@@ -421,13 +430,13 @@ def run_batch(
         )
 
         if run_result.result is not None and run_result.result.probes:
-            prefix = resolved_output_name
-            write_output_files(
-                run_result.result,
-                prefix,
-                mask_seqs=run_result.result.mask_strings,
-                output_dir=output_dir,
-            )
+            if output_dir:
+                write_output_files(
+                    run_result.result,
+                    resolved_output_name,
+                    mask_seqs=run_result.result.mask_strings,
+                    output_dir=output_dir,
+                )
             batch_results.append(BatchResult(
                 filename=fname,
                 n_probes_found=len(run_result.result.probes),
@@ -486,3 +495,55 @@ def write_batch_summary(results: List[BatchResult], output_dir: str) -> str:
     with open(filepath, 'w') as f:
         f.write(summary)
     return filepath
+
+
+def package_batch_results_zip(results: List[BatchResult]) -> bytes:
+    """Package all batch results into a ZIP archive (in memory).
+
+    The ZIP contains per-gene output files generated from in-memory data,
+    plus a batch_summary.tsv. Only successful runs (with probes) are included.
+
+    ZIP structure:
+        {prefix}_oligos.txt
+        {prefix}_seq.txt
+        {prefix}_{bowtie_hit_suffix}   (for each hit file, if masking was used)
+        {prefix}_bowtie_pseudogene_raw.txt  (if raw bowtie output saved)
+        {prefix}_bowtie_genome_raw.txt      (if raw bowtie output saved)
+        batch_summary.tsv
+
+    Args:
+        results: List of BatchResult from run_batch
+
+    Returns:
+        ZIP file contents as bytes.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for br in results:
+            if br.result is None or not br.result.probes:
+                continue
+            prefix = br.filename
+
+            zf.writestr(f"{prefix}_oligos.txt", format_oligos_content(br.result))
+            zf.writestr(
+                f"{prefix}_seq.txt",
+                format_seq_content(br.result, mask_seqs=br.result.mask_strings),
+            )
+
+            for suffix, content in format_hits_content(br.result).items():
+                zf.writestr(f"{prefix}_{suffix}", content)
+
+            if br.result.bowtie_pseudogene_raw:
+                zf.writestr(
+                    f"{prefix}_bowtie_pseudogene_raw.txt",
+                    br.result.bowtie_pseudogene_raw,
+                )
+            if br.result.bowtie_genome_raw:
+                zf.writestr(
+                    f"{prefix}_bowtie_genome_raw.txt",
+                    br.result.bowtie_genome_raw,
+                )
+
+        zf.writestr("batch_summary.tsv", format_batch_summary(results))
+
+    return buf.getvalue()
