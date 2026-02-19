@@ -11,10 +11,10 @@
 # Windows:   use WSL2 to run this script (see README.md)
 #
 # Usage:
-#   chmod +x streamlit_app/setup_all.sh
-#   ./streamlit_app/setup_all.sh               # full setup
-#   ./streamlit_app/setup_all.sh --skip-genome # skip ~6.7 GB genome downloads
-#   ./streamlit_app/setup_all.sh --help
+#   chmod +x setup_all.sh
+#   ./setup_all.sh               # full setup
+#   ./setup_all.sh --skip-genome # skip ~6.7 GB genome downloads
+#   ./setup_all.sh --help
 #
 # Prerequisites:
 #   - micromamba OR mamba OR conda installed
@@ -27,10 +27,10 @@ set -euo pipefail
 
 ENV_NAME="probedesign"
 
-# Get repository root (parent of streamlit_app directory)
+# Get repository root (directory containing this script)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="$SCRIPT_DIR/environment.yml"
+REPO_ROOT="$SCRIPT_DIR"
+ENV_FILE="$REPO_ROOT/environment.yml"
 INDEX_DIR="$REPO_ROOT/bowtie_indexes"
 FASTA_DIR="$REPO_ROOT/probedesign/pseudogeneDBs"
 
@@ -107,7 +107,7 @@ echo ""
 if [ ! -f "$ENV_FILE" ]; then
     echo -e "${RED}ERROR: environment.yml not found at ${ENV_FILE}${NC}"
     echo "Make sure you are running this script from the repository root:"
-    echo "  ./streamlit_app/setup_all.sh"
+    echo "  ./setup_all.sh"
     exit 1
 fi
 

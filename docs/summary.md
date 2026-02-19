@@ -55,7 +55,7 @@ The preferred way is via the environment file (handles all dependencies in one s
 
 ```bash
 # Using micromamba / mamba / conda (auto-detected by setup_all.sh):
-micromamba env create -f streamlit_app/environment.yml
+micromamba env create -f environment.yml
 micromamba activate probedesign
 pip install -e .
 ```
@@ -377,7 +377,7 @@ All changes are **additive** — no existing function signatures were broken, an
 ### Create / Activate Environment
 ```bash
 # Create from environment.yml (first time):
-micromamba env create -f streamlit_app/environment.yml
+micromamba env create -f environment.yml
 pip install -e .
 
 # Activate (every session):
@@ -409,8 +409,8 @@ bowtie --version               # bowtie-align-s version 1.3.1
 | Python package | `src/probedesign/` |
 | CLI entry point | `src/probedesign/cli.py` |
 | Streamlit app | `streamlit_app/app.py` |
-| Conda environment file | `streamlit_app/environment.yml` |
+| Conda environment file | `environment.yml` |
 | Bowtie indices | `bowtie_indexes/` |
 | Pseudogene FASTAs | `probedesign/pseudogeneDBs/` |
 | Test cases | `test_cases/` |
-| Setup script | `streamlit_app/setup_all.sh` |
+| Setup script | `setup_all.sh` |

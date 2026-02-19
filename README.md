@@ -1,288 +1,387 @@
 # ProbeDesign
 
-Single molecule RNA FISH probe design software from the Raj Lab.
+> Design oligonucleotide probes for single molecule RNA FISH experiments.
 
-## Overview
+This repo is a fork of https://github.com/arjunrajlaboratory/ProbeDesign from the Raj Lab.
 
 ProbeDesign creates oligonucleotide probes for single molecule RNA FISH experiments. It selects optimal probe sequences based on:
 
-- **Thermodynamic properties**: Targets specific Gibbs free energy values for RNA-DNA hybridization
-- **Sequence masking**: Avoids cross-hybridization by masking regions that align to pseudogenes or repetitive genomic sequences
-- **Optimal spacing**: Uses dynamic programming to find the best probe placements
+- **Thermodynamic properties** — targets specific Gibbs free energy for RNA-DNA hybridization (Sugimoto 1995)
+- **Sequence masking** — avoids cross-hybridization to pseudogenes, repeats, and repetitive genomic regions
+- **Optimal spacing** — uses dynamic programming to find the best probe placements
+- **Mixed-length probes** — variable-length oligos (e.g. 18-22 bp) to maximise probe count on GC-variable sequences
 
-## Installation
+## Development Status
 
-### Python CLI (Recommended)
+**Completed** 
+- ✅ Streamlit GUI application
+- ✅ Batch mode for CLI and GUI
+- ✅ Allow bowtie result output
+- ✅ Implement automated mixed-length probe design compatible with dynamic programming
+
+**In Development / Planned**
+- [ ] Test local RepeatMasker installation
+- [ ] Implement homopolymer filter
+- [ ] Implement hairpin structure & inter-probe duplex formation filters
+
+---
+
+## Table of Contents
+
+1. [Quick Start](#1-quick-start)
+2. [Installation](#2-installation)
+3. [Web App (Streamlit)](#3-web-app-streamlit)
+4. [Command-Line Interface](#4-command-line-interface)
+5. [Masking Options](#5-masking-options)
+6. [Output Files](#6-output-files)
+7. [Troubleshooting](#7-troubleshooting)
+8. [Project Structure](#8-project-structure)
+9. [Further Reading](#9-further-reading)
+
+---
+
+## 1. Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/arjunrajlab/ProbeDesign.git
-cd ProbeDesign
+# 1. Install a package manager (micromamba, mamba, or conda)
+#    See Section 2 for details
 
-# Install with pip (requires Python 3.8+)
+# 2. Clone and set up
+git clone https://github.com/JYLeeSci/smFISHProbeDesign.git
+cd smFISHProbeDesign
+chmod +x setup_all.sh
+./setup_all.sh          # ~18 min first run (downloads genome indices)
+
+# 3. Launch the web app
+micromamba activate probedesign   # or: mamba / conda activate probedesign
+streamlit run streamlit_app/app.py
+
+# 4. Or use the CLI
+probedesign design input.fa --probes 48 --pseudogene-mask --genome-mask
+```
+
+---
+
+## 2. Installation
+
+### Platform Support
+
+| OS | Supported | Notes |
+|----|-----------|-------|
+| **macOS** (Apple Silicon / Intel) | ✅ | |
+| **Linux** (x86_64 / aarch64) | ✅ | |
+| **Windows** | ⚠️ WSL2 only | `wsl --install` in PowerShell, then use Ubuntu terminal |
+
+### Step 1 — Install a Package Manager
+
+You need **one** of `micromamba`, `mamba`, or `conda`. The setup script auto-detects whichever is available.
+
+**Option A — Miniforge** (recommended):
+
+1. Download from [github.com/conda-forge/miniforge/releases/latest](https://github.com/conda-forge/miniforge/releases/latest)
+2. Run: `bash ~/Downloads/Miniforge3-*.sh`
+3. Restart terminal, verify: `conda --version`
+
+**Option B — micromamba** (lighter):
+
+```bash
+"${SHELL}" <(curl -L micro.mamba.pm/install.sh)
+```
+
+### Step 2 — Clone and Run Setup
+
+```bash
+git clone https://github.com/JYLeeSci/smFISHProbeDesign.git
+cd smFISHProbeDesign
+chmod +x setup_all.sh
+./setup_all.sh
+```
+
+The script will:
+1. Create a `probedesign` conda environment (Python 3.11 + Bowtie 1.3.1)
+2. Install the `probedesign` package + Streamlit
+3. Build pseudogene alignment indices (~1 min)
+4. Download genome alignment indices (~12 min, ~6.7 GB)
+5. Run validation tests
+
+To skip the 6.7 GB genome download: `./setup_all.sh --skip-genome`
+
+### Manual Setup (Advanced)
+
+```bash
+# Create environment from environment.yml
+micromamba env create -f environment.yml   # or: mamba / conda env create -f environment.yml
+micromamba activate probedesign
 pip install -e .
 
-# Verify installation
-probedesign --version
+# Update an existing environment
+micromamba env update -n probedesign -f environment.yml --prune
+
+# Remove and recreate from scratch
+micromamba env remove -n probedesign
+micromamba env create -f environment.yml
 ```
 
-### Bowtie Setup (for masking)
-
-Masking requires [Bowtie 1](http://bowtie-bio.sourceforge.net/) and genome indexes. See [BOWTIE.md](BOWTIE.md) for detailed setup instructions.
-
-**Important**: Install bowtie via conda/mamba (NOT homebrew, which has a different tool with the same name).
+Without `environment.yml`:
 
 ```bash
-# Install bowtie via conda/mamba
-mamba install bowtie
-
-# Verify it's the bioinformatics bowtie
-bowtie --version  # Should show "bowtie-align-s version 1.x.x"
-
-# Create indexes directory
-mkdir -p bowtie_indexes && cd bowtie_indexes
-
-# Build pseudogene index from included FASTA files
-bowtie-build ../probedesign/pseudogeneDBs/human.fasta humanPseudo
-
-# Download human genome index (~3GB)
-curl -O ftp://ftp.ccb.jhu.edu/pub/data/bowtie_indexes/GRCh38_no_alt.zip
-unzip GRCh38_no_alt.zip
+micromamba create -n probedesign \
+    -c conda-forge -c bioconda --channel-priority strict \
+    python=3.11 "click>=8.0" bowtie=1.3.1 -y
+micromamba activate probedesign
+pip install -e .
+pip install "streamlit>=1.32" "pandas>=1.5"
 ```
 
-For other species, build the corresponding pseudogene index:
-```bash
-bowtie-build ../probedesign/pseudogeneDBs/mouse.fasta mousePseudo
-bowtie-build ../probedesign/pseudogeneDBs/elegans.fasta celegansPseudo
-bowtie-build ../probedesign/pseudogeneDBs/drosophila.fasta drosophilaPseudo
-```
+---
 
-## Quick Start
+## 3. Web App (Streamlit)
+
+The primary interface for probe design is a Streamlit web application.
+
+### Launch
 
 ```bash
-# Basic usage (no masking)
-probedesign design input.fa
-
-# With pseudogene and genome masking (recommended)
-probedesign design input.fa --pseudogene-mask --genome-mask --index-dir bowtie_indexes
-
-# With automatic repeat masking (requires RepeatMasker installed locally)
-probedesign design input.fa --repeatmask
-
-# With manual repeat masking (using RepeatMasker output file)
-probedesign design input.fa --repeatmask-file input_repeatmasked.fa
-
-# Full example with all options
-probedesign design input.fa \
-  --probes 48 \
-  --oligo-length 20 \
-  --spacer-length 2 \
-  --target-gibbs -23 \
-  --allowable-gibbs -26,-20 \
-  --repeatmask \
-  --pseudogene-mask \
-  --genome-mask \
-  --species human \
-  --index-dir bowtie_indexes \
-  --output MyProbes
+micromamba activate probedesign   # or mamba / conda
+streamlit run streamlit_app/app.py
+# Opens http://localhost:8501
 ```
 
-## CLI Reference
+### Single Mode
+
+1. Upload or paste a FASTA file
+2. Adjust parameters in the sidebar (probes, oligo length, masking)
+3. Click **Design Probes**
+4. Download `_oligos.txt` and `_seq.txt`
+
+### Batch Mode
+
+1. Switch to **Batch** mode
+2. Provide a folder of FASTA files (or upload multiple files)
+3. Set an output directory
+4. Click **Run Batch** — results are written per-file with a summary TSV
+
+### Sidebar Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Number of probes | 48 | Target probe count |
+| Oligo length mode | Fixed (20 bp) | Fixed length or mixed range (e.g. 18-22 bp) |
+| Spacer length | 2 bp | Minimum gap between probes |
+| Target Gibbs FE | −23.0 kcal/mol | Optimal binding free energy |
+| Allowable Gibbs range | −26 to −20 | Probes outside this are excluded |
+| Species | human | Genome/pseudogene database |
+| Pseudogene mask | on | Filter probes matching pseudogenes |
+| Genome mask | on | Filter repetitive genome regions |
+| RepeatMasker | off | Auto-detect repeats (requires extra setup) |
+
+### Mixed-Length Probes
+
+Select **Mixed range** under "Oligo length mode" to use variable-length probes (e.g. 18-22 bp). This maximises probe count on sequences with variable GC content — GC-rich regions get shorter probes, AT-rich regions get longer probes, all within the same Gibbs FE target range.
+
+---
+
+## 4. Command-Line Interface
+
+### `probedesign design`
 
 ```
-probedesign design [OPTIONS] INPUT_FILE
+Usage: probedesign design [OPTIONS] INPUT_FILE
 
-Arguments:
-  INPUT_FILE                FASTA file containing target sequence
+  Design probes for a target sequence.
+  INPUT_FILE is a FASTA file containing the target sequence.
 
 Options:
-  -n, --probes INTEGER      Number of probes to design (default: 48)
-  -l, --oligo-length INT    Length of each oligonucleotide (default: 20)
-  -s, --spacer-length INT   Minimum gap between probes (default: 2)
-  -g, --target-gibbs FLOAT  Target Gibbs free energy in kcal/mol (default: -23)
-  --allowable-gibbs TEXT    Allowable Gibbs FE range as min,max (default: -26,-20)
-  -o, --output TEXT         Output file prefix (default: input filename)
-  -q, --quiet               Suppress output to stdout
+  -n, --probes INTEGER            Number of probes to design  [default: 48]
+  -l, --oligo-length TEXT         Oligo length: single int (e.g. 20) or range
+                                  for mixed lengths (e.g. 18-22)  [default: 20]
+  -s, --spacer-length INTEGER     Minimum gap between probes  [default: 2]
+  -g, --target-gibbs FLOAT        Target Gibbs free energy in kcal/mol  [default: -23]
+  --allowable-gibbs TEXT          Allowable Gibbs FE range as min,max  [default: -26,-20]
+  -o, --output TEXT               Output file prefix (default: derived from input filename)
+  -q, --quiet                     Suppress output to stdout
   --species [human|mouse|elegans|drosophila|rat]
-                            Species for masking databases (default: human)
-  --repeatmask              Run RepeatMasker automatically (requires local install)
-  --repeatmask-file PATH    FASTA file with N's marking repeat regions (manual)
-  --pseudogene-mask         Mask regions that align to pseudogenes
-  --genome-mask             Mask repetitive genomic regions
-  --index-dir PATH          Directory containing bowtie indexes
+                                  Species for masking databases  [default: human]
+  --pseudogene-mask / --no-pseudogene-mask
+                                  Mask regions that align to pseudogenes  [default: off]
+  --genome-mask / --no-genome-mask
+                                  Mask repetitive genomic regions  [default: off]
+  --index-dir DIRECTORY           Directory containing bowtie indexes (default: auto-detect)
+  --repeatmask-file PATH          FASTA file with N's marking repeat regions (manual masking)
+  --repeatmask / --no-repeatmask  Run RepeatMasker automatically to mask repeats  [default: off]
+  --save-bowtie-raw               Save raw bowtie alignment output (produces large files)
+  --help                          Show this message and exit.
 ```
 
-## Output Files
+### `probedesign analyze`
 
-ProbeDesign generates two output files:
-
-### `<output>_oligos.txt`
-
-Tab-separated file with probe details:
+Check the Gibbs FE distribution of a sequence before designing probes — useful for choosing
+appropriate `--target-gibbs` and `--allowable-gibbs` values.
 
 ```
-Index  GC%  Tm    Gibbs   Sequence              Name
-1      55   66.2  -24.7   gtctcagaagctgcgattcg  MyProbes_1
-2      65   63.2  -26.0   gaatgctgggcgcgcgaaag  MyProbes_2
-...
+Usage: probedesign analyze [OPTIONS] INPUT_FILE
+
+Options:
+  -l, --oligo-length INTEGER  Length of oligonucleotide to analyze  [default: 20]
+  --help                      Show this message and exit.
 ```
 
-### `<output>_seq.txt`
-
-Visual alignment of probes against the input sequence, showing masked regions and probe positions.
-
-## Masking Options
-
-### Pseudogene Masking (`--pseudogene-mask`)
-
-Masks regions that align to known pseudogene sequences. Uses 16-mer alignment with bowtie. Short runs (<18bp) are removed to avoid spurious masking.
-
-### Genome Masking (`--genome-mask`)
-
-Masks repetitive genomic regions using multiple alignment stringencies:
-- 12-mer with threshold 4000 hits (very repetitive)
-- 14-mer with threshold 500 hits
-- 16-mer with threshold 20 hits
-
-### Automatic Repeat Masking (`--repeatmask`)
-
-If you have RepeatMasker installed locally, ProbeDesign can run it automatically:
+### Examples
 
 ```bash
-probedesign design input.fa --repeatmask --probes 32
+# Check Gibbs FE distribution before designing
+probedesign analyze input.fa
+
+# Basic: 32 probes, no masking
+probedesign design input.fa --probes 32
+
+# Recommended: pseudogene + genome masking
+probedesign design input.fa --probes 48 --pseudogene-mask --genome-mask
+
+# Mixed-length probes (18-22 bp) — maximises count on GC-variable sequences
+probedesign design input.fa --probes 48 -l 18-22
+
+# Repeat masking from a pre-masked file (N's mark repeats)
+probedesign design input.fa --probes 32 --repeatmask-file input_masked.fa
+
+# HCR probes (52 bp, adjusted thermodynamic targets)
+probedesign design input.fa --probes 20 -l 52 \
+  --target-gibbs -60 --allowable-gibbs -80,-40
+
+# Mouse gene, all masking, custom output prefix
+probedesign design my_gene.fa --probes 48 --species mouse \
+  --pseudogene-mask --genome-mask -o MyGene_probes
 ```
 
-**Quick Setup (Human/Mouse):**
-```bash
-# Install RepeatMasker
-mamba install -c bioconda -c conda-forge repeatmasker
+---
 
-# Download Mammalia database (~8.9GB compressed, ~56GB extracted)
-cd /opt/homebrew/Caskroom/miniforge/base/share/RepeatMasker/Libraries/famdb
-curl -O https://www.dfam.org/releases/current/families/FamDB/dfam39_full.7.h5.gz
-gunzip dfam39_full.7.h5.gz
-```
+## 5. Masking Options
 
-**Note:** The database requires ~65GB disk space. See [REPEATMASKER.md](REPEATMASKER.md) for detailed setup instructions, troubleshooting, and the web-based alternative if disk space is limited.
+Masking removes probe candidates that would hybridize non-specifically.
 
-### Manual Repeat Masking (`--repeatmask-file`)
+### Repeat Masking (R Mask)
 
-For sequences with repetitive elements, you can provide a pre-masked file:
+| Method | Flag | Use case |
+|--------|------|----------|
+| Auto-detect | *(none)* | FASTA already has `N`s at repeats |
+| Manual file | `--repeatmask-file PATH` | Pre-masked sequence file |
+| Automatic | `--repeatmask` | Runs RepeatMasker locally (see [docs/REPEATMASKER.md](docs/REPEATMASKER.md)) |
 
-**Option A**: Use RepeatMasker's website
-1. Upload your FASTA to [RepeatMasker's website](http://www.repeatmasker.org/)
-2. Download the masked output file (contains N's where repeats are)
-3. Use the `--repeatmask-file` option:
+### Pseudogene Masking (P Mask) — `--pseudogene-mask`
 
-**Option B**: Run RepeatMasker locally
-1. Run: `RepeatMasker -species human input.fa`
-2. Use the output: `probedesign design input.fa --repeatmask-file input.fa.masked`
+16-mer exact alignment against curated pseudogene databases. Indices built by `setup_all.sh`.
 
-```bash
-probedesign design input.fa --repeatmask-file input_repeatmasked.fa --output MyProbes
-```
+### Genome Masking (B Mask) — `--genome-mask`
 
-**Note**: You cannot use both `--repeatmask` and `--repeatmask-file` together.
+Three bowtie searches (12/14/16-mers) against the whole genome with tiered hit-count thresholds.
 
-### Species Support
+### Supported Species
 
-Masking databases are available for: `human`, `mouse`, `elegans`, `drosophila`, `rat`
+| Species | `--species` | Pseudogene | Genome |
+|---------|-------------|------------|--------|
+| Human | `human` | ✅ | ✅ |
+| Mouse | `mouse` | ✅ | ✅ |
+| Drosophila | `drosophila` | ✅ | ✅ |
+| C. elegans | `elegans` | Manual | Manual |
+| Rat | `rat` | Manual | Manual |
 
-## Thermodynamics
+---
 
-ProbeDesign uses Sugimoto 1995 parameters for RNA-DNA hybrid thermodynamics:
+## 6. Output Files
 
-- **Gibbs Free Energy**: Calculated at 37°C
-- **Melting Temperature**: Calculated with salt=0.33M, primer concentration=50µM
-- **Default target**: -23 kcal/mol (range: -26 to -20)
+### `<name>_oligos.txt`
 
-For HCR probes (longer oligos), use different parameters:
-```bash
-probedesign design input.fa -l 52 --target-gibbs -60 --allowable-gibbs -80,-40
-```
+Tab-separated, one probe per line. Order sequences from the last two columns when placing synthesis orders.
 
-## MATLAB Version (Legacy)
+| Column | Content |
+|--------|---------|
+| 1 — Index | Probe number (1-based) |
+| 2 — Start | Start position in target sequence (1-based, nucleotides) |
+| 3 — GC% | GC content |
+| 4 — Tm | Melting temperature (°C) |
+| 5 — Gibbs | ΔG (kcal/mol) |
+| 6 — Sequence | Probe sequence (5'→3') |
+| 7 — Name | Probe label |
 
-The original MATLAB implementation is in `probedesign/findprobesLocal.m`. It requires MATLAB and has additional features like repeat masking via RepeatMasker.
+### `<name>_seq.txt`
 
-```matlab
-% Basic usage
-findprobesLocal('input.fa', 48)
+Visual sequence map (110 chars per line) showing probe placement and masking. Useful for checking masking behaviour.
 
-% With options
-findprobesLocal('input.fa', 32, ...
-    'outfilename', 'MyProbes', ...
-    'pseudogenemask', true, ...
-    'genomemask', true, ...
-    'repeatmask', false, ...
-    'species', 'human')
-```
+Each block shows:
+- **Sequence line**: Original target sequence
+- **R line** (when repeat masking used): `R` = masked position, base = unmasked
+- **P line** (when pseudogene mask used): `P` = masked
+- **B line** (when genome mask used): `B` = masked
+- **F line** (always): `F` = thermodynamically excluded, base = valid probe start
+- **Probe complement line**: reverse-complement sequence placed below the target
+- **Probe label line**: `Prb# N, Pos X, FE Y, GC Z` for each probe
 
-### RepeatMasker Integration
+### Additional files (when masking is enabled)
 
-**Python CLI (recommended):**
+| File | Content |
+|------|---------|
+| `<name>_bowtie_pseudogene.txt` | Per-position 16-mer hit counts from pseudogene search |
+| `<name>_bowtie_genome.txt` | Per-position hit counts from genome search (12/14/16-mers) |
+| `<name>_bowtie_*_raw.txt` | Raw bowtie alignment output (only with `--save-bowtie-raw`) |
 
-Option 1 - Automatic (requires local RepeatMasker):
-```bash
-probedesign design mCherry.fasta --repeatmask --probes 32
-```
+---
 
-Option 2 - Manual (using pre-masked file):
-```bash
-probedesign design mCherry.fasta --repeatmask-file mCherry_repeatmasked.fa --output mCherry_probes
-```
+## 7. Troubleshooting
 
-See [REPEATMASKER.md](REPEATMASKER.md) for RepeatMasker installation instructions.
+| Problem | Solution |
+|---------|----------|
+| `micromamba / conda: command not found` | Restart terminal after installing; re-run installer if needed |
+| `bowtie: command not found` | Activate environment: `micromamba activate probedesign` |
+| Wrong bowtie (file manager, not aligner) | Only install via bioconda, not homebrew |
+| Setup fails at pseudogene indices | Check `probedesign/pseudogeneDBs/*.fasta` exist |
+| Genome download interrupted | Re-run `./setup_all.sh` (resumes automatically) |
+| `streamlit: command not found` | Activate environment first |
+| Port 8501 in use | `streamlit run streamlit_app/app.py --server.port 8502` |
+| Windows | Use WSL2 Ubuntu terminal, not PowerShell |
 
-**MATLAB:**
-```matlab
-findprobesLocal('mCherry.fasta', 32, ...
-    'repeatmask', true, ...
-    'repeatmaskmanual', true, ...
-    'repeatmaskfile', 'mCherry_repeatmasked.fa', ...
-    'species', 'mouse')
-```
+---
 
-## Testing
-
-See [TEST.md](TEST.md) for validation instructions and test cases.
-
-## Project Structure
+## 8. Project Structure
 
 ```
-ProbeDesign/
+smFISHProbeDesign/
 ├── src/probedesign/          # Python package
-│   ├── cli.py                # Command-line interface
-│   ├── core.py               # Main probe design algorithm
-│   ├── thermodynamics.py     # Gibbs FE and Tm calculations
-│   ├── masking.py            # Bowtie-based sequence masking
-│   ├── sequence.py           # Sequence utilities
-│   ├── fasta.py              # FASTA I/O
-│   └── output.py             # Output file generation
-├── probedesign/              # MATLAB code
-│   ├── findprobesLocal.m     # Main MATLAB function
-│   └── pseudogeneDBs/        # Pseudogene FASTA files
-├── DesignServer/             # Legacy Python server code
+│   ├── cli.py                #   Click-based CLI
+│   ├── core.py               #   Probe design algorithm (badness, DP, mixed-length)
+│   ├── thermodynamics.py     #   Gibbs FE and Tm (Sugimoto 1995)
+│   ├── masking.py            #   Bowtie masking (pseudogene, genome, RepeatMasker)
+│   ├── sequence.py           #   Sequence utilities
+│   ├── fasta.py              #   FASTA I/O
+│   └── output.py             #   Output file generation
+├── streamlit_app/            # Streamlit web app
+│   ├── app.py                #   Main UI
+│   └── utils.py              #   Backend helpers
+├── probedesign/              # Legacy MATLAB code
+│   ├── findprobesLocal.m     #   Original MATLAB implementation
+│   └── pseudogeneDBs/        #   Pseudogene FASTA files
+├── docs/                     # Documentation
+│   ├── BOWTIE.md             #   Bowtie setup guide
+│   ├── REPEATMASKER.md       #   RepeatMasker setup guide
+│   ├── MIXED_LENGTH_PLAN.md  #   Mixed-length design plan
+│   ├── probe_design_principles.md  # Algorithm details
+│   └── summary.md            #   Development notes
 ├── test_cases/               # Validation test cases
-├── bowtie_indexes/           # Genome indexes (gitignored)
+├── bowtie_indexes/           # Genome/pseudogene indices (gitignored)
+├── setup_all.sh              # Automated setup script
+├── environment.yml           # Conda environment specification
 ├── pyproject.toml            # Python package config
-├── BOWTIE.md                 # Bowtie setup instructions
-├── REPEATMASKER.md           # RepeatMasker setup instructions
-└── TEST.md                   # Testing documentation
+├── CLAUDE.md                 # AI coding context
+└── README.md                 # This file
 ```
 
-## Algorithm
+---
 
-1. **Read input**: Parse FASTA file, clean sequence
-2. **Calculate badness**: For each position, compute squared distance from target Gibbs FE
-3. **Apply masking**: Mark regions aligning to pseudogenes/repetitive sequences as infinite badness
-4. **Dynamic programming**: Find optimal probe placements minimizing average badness
-5. **Generate output**: Create oligo and sequence alignment files
+## 9. Further Reading
 
-## License
-
-MIT License - See LICENSE file for details.
-
-## Citation
-
-If you use this software, please cite the Raj Lab.
+| Document | Description |
+|----------|-------------|
+| [docs/probe_design_principles.md](docs/probe_design_principles.md) | Thermodynamic model, masking algorithm, DP optimization |
+| [docs/summary.md](docs/summary.md) | Development notes, Bowtie 1/2 index compatibility |
+| [docs/BOWTIE.md](docs/BOWTIE.md) | Bowtie installation and index setup |
+| [docs/REPEATMASKER.md](docs/REPEATMASKER.md) | RepeatMasker installation (~56 GB database) |
+| [docs/MIXED_LENGTH_PLAN.md](docs/MIXED_LENGTH_PLAN.md) | Mixed-length probe design plan and analysis |
