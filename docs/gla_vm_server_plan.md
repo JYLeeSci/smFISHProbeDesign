@@ -115,23 +115,51 @@ cd smFISHProbeDesign
 
 ---
 
-### Step 5 — Run the Setup Script
+### Step 5 — Run the Setup Script Inside a screen Session
 
-The `setup_all.sh` script creates the conda environment, installs the package, builds pseudogene indices, and downloads genome indices.
+The setup script downloads ~6.7 GB of genome indices and takes 15–30+ minutes depending on network speed. **Run it inside `screen`** so the process survives SSH disconnection. If your connection drops mid-download, you can reconnect and reattach to find it still running.
+
+**5a. Install `screen`** (if not already present):
 
 ```bash
+sudo dnf install -y screen
+```
+
+**5b. Start a named screen session:**
+
+```bash
+screen -S probedesign_setup
+```
+
+You are now inside a persistent session. The terminal looks the same — the difference is the session lives on the server independently of your SSH connection.
+
+**5c. Run the setup script:**
+
+```bash
+cd ~/GitHub/smFISHProbeDesign
 chmod +x setup_all.sh
 ./setup_all.sh
 ```
 
-This will:
+**Essential `screen` commands:**
+
+| Action | Keys |
+|--------|------|
+| Detach (leave running) | `Ctrl-A` then `D` |
+| Reattach after reconnecting | `screen -r probedesign_setup` |
+| List all sessions | `screen -ls` |
+| Kill session when done | `exit` (inside session) |
+
+If your SSH connection drops, simply SSH back in and run `screen -r probedesign_setup` to reattach.
+
+**What the script does:**
 
 1. **Create `probedesign` conda environment** (~500 MB download)
    - Python 3.11, Bowtie 1.3.1, Click, Streamlit, Pandas
 2. **Install the `probedesign` package** (editable mode)
 3. **Build pseudogene indices** from shipped FASTAs (~1 min)
    - `humanPseudo`, `mousePseudo`, `drosophilaPseudo`
-4. **Download genome indices** from AWS (~6.7 GB, ~12 min)
+4. **Download genome indices** from AWS (~6.7 GB, ~12–30 min depending on network)
    - Human GRCh38 (~3.5 GB), Mouse mm10 (~3.1 GB), Drosophila BDGP6 (~176 MB)
 5. **Run validation tests** (7 checks)
 
@@ -141,7 +169,7 @@ This will:
 ./setup_all.sh --skip-genome
 ```
 
-You can always re-run `./setup_all.sh` later to download genome indices — it skips already-completed steps.
+You can always re-run `./setup_all.sh` later — it skips already-completed steps, so it is safe to resume an interrupted run.
 
 **Expected output** (all tests pass):
 
@@ -150,11 +178,17 @@ Tests: 7/7 passed
 All checks passed!
 ```
 
+When done, exit the screen session:
+
+```bash
+exit
+```
+
 ---
 
 ### Step 6 — Verify the Installation
 
-Activate the environment and run quick checks:
+Activate the environment and run quick checks.
 
 ```bash
 micromamba activate probedesign
@@ -164,19 +198,47 @@ python --version           # Python 3.11.x
 bowtie --version           # bowtie-align-s version 1.3.1
 streamlit --version        # 1.x.x
 probedesign --version      # 0.1.0
+```
 
-# Quick probe design test (no masking, fast)
+**Verify bowtie index auto-detection:**
+
+Both the CLI and the Streamlit app derive the index directory automatically from the script's own location using `Path(__file__).resolve()`, not from the current working directory. This means the path is always `~/GitHub/smFISHProbeDesign/bowtie_indexes` regardless of where you `cd` before running.
+
+Confirm the indices are where the app expects them:
+
+```bash
+ls ~/GitHub/smFISHProbeDesign/bowtie_indexes/*.1.ebwt 2>/dev/null | head -5
+# Should list: humanPseudo.1.ebwt, mousePseudo.1.ebwt, drosophilaPseudo.1.ebwt
+
+ls ~/GitHub/smFISHProbeDesign/bowtie_indexes/*.1.bt2 2>/dev/null | head -5
+# Should list: GCA_000001405.15_GRCh38_no_alt_analysis_set.1.bt2, mm10.1.bt2, drosophila.1.bt2
+```
+
+Test CLI probe design with pseudogene masking to confirm the index is found:
+
+```bash
+cd ~/GitHub/smFISHProbeDesign
+
+# No masking — fast sanity check
 probedesign design test_cases/CDKN1A_32/CDKN1A.fa --probes 32 \
   --repeatmask-file test_cases/CDKN1A_32/CDKN1A_repeatmasked.fa \
   -o /tmp/test_cdkn1a --quiet
+cat /tmp/test_cdkn1a_oligos.txt | wc -l   # Should print: 32
 
-# Check output
-cat /tmp/test_cdkn1a_oligos.txt | wc -l   # Should output: 32
+# With pseudogene masking (verifies index auto-detection)
+probedesign design test_cases/KRT19_withUTRs/KRT19_withUTRs.fa --probes 32 \
+  --pseudogene-mask --quiet -o /tmp/test_krt19
+echo "Exit code: $?"   # Should print: Exit code: 0
+```
 
-# Quick Streamlit smoke test (verify it starts, then Ctrl+C)
+In the Streamlit UI, the "Bowtie index directory" sidebar field is pre-filled with the same auto-detected path. The `check_prerequisites()` function validates the index files exist before any design run and shows a warning banner if anything is missing — it will never silently fail.
+
+**Quick Streamlit smoke test** (verify it starts, then Ctrl+C):
+
+```bash
 streamlit run streamlit_app/app.py --server.port 8501 --server.address 0.0.0.0
 # You should see: "You can now view your Streamlit app in your browser."
-# Press Ctrl+C to stop
+# Press Ctrl+C to stop — the systemd service will manage it from here
 ```
 
 ---
@@ -614,6 +676,9 @@ Access via `http://<vm-hostname-or-ip>` (no port number).
 | Task | Command |
 |------|---------|
 | SSH in | `ssh <username>@<vm-ip>` |
+| Start screen session | `screen -S probedesign_setup` |
+| Detach from screen | `Ctrl-A` then `D` |
+| Reattach to screen | `screen -r probedesign_setup` |
 | Check service | `sudo systemctl status probedesign` |
 | Restart service | `sudo systemctl restart probedesign` |
 | View live logs | `sudo journalctl -u probedesign -f` |
@@ -622,4 +687,5 @@ Access via `http://<vm-hostname-or-ip>` (no port number).
 | Check memory | `free -m` |
 | Check port | `ss -tlnp \| grep 8501` |
 | Check firewall | `sudo firewall-cmd --list-ports` |
+| Verify index dir | `ls ~/GitHub/smFISHProbeDesign/bowtie_indexes/*.1.bt2 \| wc -l` |
 | App URL | `http://<vm-ip>:8501` |
