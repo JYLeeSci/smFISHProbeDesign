@@ -72,7 +72,7 @@ with st.sidebar:
     # Basic parameters
     n_probes = st.number_input(
         "Number of probes",
-        min_value=1, max_value=200, value=48, step=1,
+        min_value=1, value=48, step=1,
         key="n_probes",
     )
     oligo_mode = st.radio(
@@ -110,7 +110,7 @@ with st.sidebar:
         mixed_lengths = (mixed_min, mixed_max)
     spacer_length = st.number_input(
         "Spacer length (bp)",
-        min_value=0, max_value=20, value=2, step=1,
+        min_value=0, value=2, step=1,
         key="spacer_length",
     )
     target_gibbs = st.number_input(

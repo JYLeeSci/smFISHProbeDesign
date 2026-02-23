@@ -165,9 +165,9 @@ streamlit run streamlit_app/app.py
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| Number of probes | 48 | Target probe count |
+| Number of probes | 48 | Target probe count (no upper limit) |
 | Oligo length mode | Fixed (20 bp) | Fixed length or mixed range (e.g. 18-22 bp) |
-| Spacer length | 2 bp | Minimum gap between probes |
+| Spacer length | 2 bp | Minimum gap between probes (no upper limit) |
 | Target Gibbs FE | −23.0 kcal/mol | Optimal binding free energy |
 | Allowable Gibbs range | −26 to −20 | Probes outside this are excluded |
 | Species | human | Genome/pseudogene database |

@@ -20,9 +20,9 @@ Deploy the smFISHProbeDesign Streamlit app on an Oracle Linux 9.6 university VM.
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Package manager | micromamba | Fast, lightweight, no Anaconda licensing |
-| Install location | `~/GitHub/smFISHProbeDesign` | User's home directory, easy `git pull` updates |
+| Install location | `~/Github/smFISHProbeDesign` | User's home directory, easy `git pull` updates |
 | Process manager | systemd | Auto-restart, survives reboots, journal logging |
-| Network exposure | Direct Streamlit on port 8501 | University-internal only, simpler than nginx |
+| Network exposure | IT's HTTPS Nginx config + ProbeDesign location block | IT pre-installed nginx with Let's Encrypt cert and HTTP→HTTPS redirect; we add our app as a location block inside their HTTPS server |
 | RepeatMasker | Skip for now | Users can upload pre-masked files; add later if needed |
 | Swap | Keep existing 3.9 GB | Already sufficient — genome masking peaks ~3.5 GB |
 
@@ -30,10 +30,10 @@ Deploy the smFISHProbeDesign Streamlit app on an Oracle Linux 9.6 university VM.
 
 | Component | Size | Location |
 |-----------|------|----------|
-| Repository (code + pseudogene FASTAs) | ~200 MB | `~/GitHub/smFISHProbeDesign` |
+| Repository (code + pseudogene FASTAs) | ~200 MB | `~/Github/smFISHProbeDesign` |
 | Conda environment (Python, Bowtie, Streamlit) | ~500 MB | `~/micromamba/envs/probedesign` |
-| Pseudogene bowtie indices (3 species) | ~85 MB | `~/GitHub/smFISHProbeDesign/bowtie_indexes` |
-| Genome indices (human + mouse + drosophila) | ~6.7 GB | `~/GitHub/smFISHProbeDesign/bowtie_indexes` |
+| Pseudogene bowtie indices (3 species) | ~85 MB | `~/Github/smFISHProbeDesign/bowtie_indexes` |
+| Genome indices (human + mouse + drosophila) | ~6.7 GB | `~/Github/smFISHProbeDesign/bowtie_indexes` |
 | **Total** | **~7.5 GB** | All under `/home` (421 GB free) |
 
 ---
@@ -107,8 +107,8 @@ micromamba config set channel_priority strict
 ### Step 4 — Clone the Repository
 
 ```bash
-mkdir -p ~/GitHub
-cd ~/GitHub
+mkdir -p ~/Github
+cd ~/Github
 git clone https://github.com/JYLeeSci/smFISHProbeDesign.git
 cd smFISHProbeDesign
 ```
@@ -136,7 +136,7 @@ You are now inside a persistent session. The terminal looks the same — the dif
 **5c. Run the setup script:**
 
 ```bash
-cd ~/GitHub/smFISHProbeDesign
+cd ~/Github/smFISHProbeDesign
 chmod +x setup_all.sh
 ./setup_all.sh
 ```
@@ -202,22 +202,22 @@ probedesign --version      # 0.1.0
 
 **Verify bowtie index auto-detection:**
 
-Both the CLI and the Streamlit app derive the index directory automatically from the script's own location using `Path(__file__).resolve()`, not from the current working directory. This means the path is always `~/GitHub/smFISHProbeDesign/bowtie_indexes` regardless of where you `cd` before running.
+Both the CLI and the Streamlit app derive the index directory automatically from the script's own location using `Path(__file__).resolve()`, not from the current working directory. This means the path is always `~/Github/smFISHProbeDesign/bowtie_indexes` regardless of where you `cd` before running.
 
 Confirm the indices are where the app expects them:
 
 ```bash
-ls ~/GitHub/smFISHProbeDesign/bowtie_indexes/*.1.ebwt 2>/dev/null | head -5
+ls ~/Github/smFISHProbeDesign/bowtie_indexes/*.1.ebwt 2>/dev/null | head -5
 # Should list: humanPseudo.1.ebwt, mousePseudo.1.ebwt, drosophilaPseudo.1.ebwt
 
-ls ~/GitHub/smFISHProbeDesign/bowtie_indexes/*.1.bt2 2>/dev/null | head -5
+ls ~/Github/smFISHProbeDesign/bowtie_indexes/*.1.bt2 2>/dev/null | head -5
 # Should list: GCA_000001405.15_GRCh38_no_alt_analysis_set.1.bt2, mm10.1.bt2, drosophila.1.bt2
 ```
 
 Test CLI probe design with pseudogene masking to confirm the index is found:
 
 ```bash
-cd ~/GitHub/smFISHProbeDesign
+cd ~/Github/smFISHProbeDesign
 
 # No masking — fast sanity check
 probedesign design test_cases/CDKN1A_32/CDKN1A.fa --probes 32 \
@@ -252,12 +252,32 @@ A systemd unit ensures the app starts on boot, restarts on crash, and logs to jo
 ```bash
 # While probedesign env is activated:
 which streamlit
-# Example output: /home/<username>/micromamba/envs/probedesign/bin/streamlit
+# Example output: /home/jeff/micromamba/envs/probedesign/bin/streamlit
 ```
 
 Note this path — you will use it in the service file below.
 
-**7b. Create the service file:**
+**7b. Fix SELinux to allow execution from the home directory:**
+
+Oracle Linux 9 (RHEL family) runs SELinux in enforcing mode. systemd (`init_t`) cannot execute binaries under `/home` unless they carry the `bin_t` label. Run this once:
+
+```bash
+sudo dnf install -y policycoreutils-python-utils   # provides semanage
+
+sudo semanage fcontext -a -t bin_t "/home/jeff/micromamba(/.*)?"
+sudo restorecon -Rv /home/jeff/micromamba/
+```
+
+Verify the label was applied:
+
+```bash
+ls -Z /home/jeff/micromamba/envs/probedesign/bin/streamlit
+# Should show: system_u:object_r:bin_t:s0
+```
+
+**7c. Create the service file:**
+
+> **Note — Linux paths are case-sensitive.** Verify your clone directory before pasting: `ls ~/Git*/`
 
 ```bash
 sudo tee /etc/systemd/system/probedesign.service > /dev/null << 'SERVICEEOF'
@@ -267,18 +287,15 @@ After=network.target
 
 [Service]
 Type=simple
-User=<your-username>
-Group=<your-username>
+User=jeff
+Group=jeff
 
-# Working directory — the cloned repo
-WorkingDirectory=/home/<your-username>/GitHub/smFISHProbeDesign
-
-# Full path to streamlit inside the conda environment
-# IMPORTANT: Use the output from `which streamlit` above
-ExecStart=/home/<your-username>/micromamba/envs/probedesign/bin/streamlit run \
-    streamlit_app/app.py \
+# Use absolute path to app.py — avoids SELinux WorkingDirectory issues
+ExecStart=/home/jeff/micromamba/envs/probedesign/bin/streamlit run \
+    /home/jeff/Github/smFISHProbeDesign/streamlit_app/app.py \
     --server.port 8501 \
-    --server.address 0.0.0.0 \
+    --server.address 127.0.0.1 \
+    --server.baseUrlPath /probedesign \
     --server.headless true \
     --browser.gatherUsageStats false
 
@@ -287,8 +304,8 @@ Restart=on-failure
 RestartSec=5
 
 # Environment — ensure the conda env's bin is in PATH so bowtie is found
-Environment="PATH=/home/<your-username>/micromamba/envs/probedesign/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="HOME=/home/<your-username>"
+Environment="PATH=/home/jeff/micromamba/envs/probedesign/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=/home/jeff"
 
 # Resource limits
 LimitNOFILE=65536
@@ -303,9 +320,7 @@ WantedBy=multi-user.target
 SERVICEEOF
 ```
 
-**IMPORTANT:** Replace every `<your-username>` with your actual username. There are 6 occurrences.
-
-**7c. Enable and start the service:**
+**7d. Enable and start the service:**
 
 ```bash
 sudo systemctl daemon-reload
@@ -313,7 +328,7 @@ sudo systemctl enable probedesign        # Start on boot
 sudo systemctl start probedesign         # Start now
 ```
 
-**7d. Check the service is running:**
+**7e. Verify the service is running:**
 
 ```bash
 sudo systemctl status probedesign
@@ -322,46 +337,207 @@ sudo systemctl status probedesign
 Expected output should show `active (running)`. If it fails, check logs:
 
 ```bash
-sudo journalctl -u probedesign -f        # Follow live logs
-sudo journalctl -u probedesign --no-pager -n 50   # Last 50 lines
+sudo journalctl -u probedesign -f                   # Follow live logs
+sudo journalctl -u probedesign --no-pager -n 50     # Last 50 lines
 ```
 
 ---
 
-### Step 8 — Configure the Firewall
+### Step 8 — Configure Nginx
 
-Oracle Linux 9 uses `firewalld`. Open port 8501 for the Streamlit app:
+Nginx acts as a reverse proxy, forwarding browser requests to the Streamlit process on `127.0.0.1:8501`.
+
+> **On this VM (and likely on any university-managed VM), IT may have already installed and configured Nginx** — including HTTPS certificates, HTTP→HTTPS redirects, and location blocks for other apps (e.g. R Shiny). You must work with that existing config, not replace it. Steps 8a–8c below show how to check and then integrate.
+
+**8a. Install Nginx (if not already present):**
 
 ```bash
-sudo firewall-cmd --permanent --add-port=8501/tcp
-sudo firewall-cmd --reload
+sudo dnf install -y nginx
+sudo systemctl enable --now nginx
+```
+
+If `nginx -v` already returns a version, it's installed — skip this step.
+
+**8b. Check for an existing nginx config from IT:**
+
+```bash
+ls /etc/nginx/conf.d/
+```
+
+Look at any `.conf` files you didn't create. Inspect them:
+
+```bash
+sudo grep -rn "ssl\|https\|return 301\|server_name\|listen" /etc/nginx/conf.d/
+```
+
+**What you're looking for:**
+
+| What you see | What it means |
+|---|---|
+| `return 301 https://` on port 80 | IT is redirecting ALL HTTP to HTTPS — a port-80-only config will never be reached |
+| `listen 443 ssl` with a `server_name` matching the VM hostname | IT has an HTTPS server block; this is where your location blocks must go |
+| `ssl_certificate /etc/letsencrypt/...` | Let's Encrypt cert already provisioned — HTTPS is fully working |
+| `proxy_pass http://127.0.0.1:3838` | IT is running R Shiny Server; your app shares the same Nginx |
+
+**On this VM** (`shinytest.mvls.gla.ac.uk`), IT's file is `/etc/nginx/conf.d/shiny.conf` and it does exactly this: redirects HTTP→HTTPS on port 80, and proxies `location /` to R Shiny on port 3838 over HTTPS with a Let's Encrypt cert.
+
+**8c. Create `streamlit_apps.conf` with only the upstream definition:**
+
+This file defines the named upstream for Streamlit (http-context, not inside a server block). The actual server and location blocks go in IT's HTTPS config (Step 8d).
+
+```bash
+sudo tee /etc/nginx/conf.d/streamlit_apps.conf > /dev/null << 'EOF'
+# ProbeDesign Streamlit upstream
+upstream probedesign {
+    server 127.0.0.1:8501;
+}
+
+# Future apps — add an upstream per app:
+# upstream rnaviewer {
+#     server 127.0.0.1:8502;
+# }
+EOF
+```
+
+**8d. Add ProbeDesign location blocks to IT's HTTPS server block:**
+
+Open IT's nginx config (e.g. `shiny.conf`) and add the ProbeDesign location blocks **before** any existing `location /` catch-all:
+
+```bash
+sudo nano /etc/nginx/conf.d/shiny.conf    # or vim, etc.
+```
+
+Add these two blocks inside the `server { listen 443 ssl ...; }` block, before the existing `location / { ... }`:
+
+```nginx
+# ── ProbeDesign Streamlit ─────────────────────────────────
+location = /probedesign {
+    return 301 /probedesign/;
+}
+
+location /probedesign/ {
+    proxy_pass         http://probedesign;
+    proxy_http_version 1.1;
+    proxy_set_header   Upgrade $http_upgrade;
+    proxy_set_header   Connection "upgrade";
+    proxy_set_header   Host $host;
+    proxy_set_header   X-Real-IP $remote_addr;
+    proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_read_timeout 86400;
+}
+```
+
+Why **before** `location /`: Nginx uses the most specific prefix match. `location /probedesign/` is more specific than `location /`, so it always wins regardless of order — but placing it first makes it visually obvious and avoids any ambiguity.
+
+The `location = /probedesign` (exact match, no slash) issues a redirect to the trailing-slash version. Without this, `location /probedesign/` (prefix match) does **not** match `/probedesign` and nginx falls through to the catch-all, returning a 404 from the Shiny server.
+
+**The complete `shiny.conf` with ProbeDesign added:**
+
+```nginx
+server {
+    listen 80 default_server;
+    server_name shinytest.mvls.gla.ac.uk;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2 default_server;
+    server_name shinytest.mvls.gla.ac.uk;
+
+    ssl_certificate /etc/letsencrypt/live/shinytest.mvls.gla.ac.uk/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/shinytest.mvls.gla.ac.uk/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE+AESGCM:ECDHE+CHACHA20';
+
+    # ── ProbeDesign Streamlit ─────────────────────────────────
+    location = /probedesign {
+        return 301 /probedesign/;
+    }
+
+    location /probedesign/ {
+        proxy_pass         http://probedesign;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+
+    # ── R Shiny (catch-all) ───────────────────────────────────
+    location / {
+        proxy_pass http://127.0.0.1:3838;
+        proxy_http_version 1.1;
+        proxy_redirect off;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        rewrite ^/(.*)$ /$1 break;
+    }
+}
+```
+
+**8e. Allow SELinux to proxy to Streamlit (required on Oracle Linux 9):**
+
+SELinux prevents `httpd` (Nginx) from making outbound connections to non-standard ports by default. Enable permanently:
+
+```bash
+sudo setsebool -P httpd_can_network_connect on
 
 # Verify
-sudo firewall-cmd --list-ports
-# Should include: 8501/tcp
+getsebool httpd_can_network_connect
+# Should print: httpd_can_network_connect --> on
 ```
 
-If `firewalld` is not running (check with `sudo systemctl status firewalld`), you may need to start it or use `iptables` instead:
+**8f. Test the config syntax and restart:**
 
 ```bash
-# Only if firewalld is not available:
-sudo iptables -A INPUT -p tcp --dport 8501 -j ACCEPT
-sudo iptables-save | sudo tee /etc/sysconfig/iptables
+sudo nginx -t
+sudo systemctl restart nginx
 ```
 
-**University network security group**: Check with your IT department whether the VM's network security group (or equivalent) allows inbound TCP connections on port 8501. This is separate from the OS firewall. If port 8501 is blocked at the network level, the firewall commands above are not sufficient.
+Expected output from `nginx -t`: `syntax is ok` / `test is successful`. A warning about conflicting `server_name` is acceptable if IT's config and yours both use `_` as a catch-all; what matters is no `[emerg]` errors.
 
 ---
 
-### Step 9 — Verify the Deployment
+### Step 9 — Configure the Firewall
+
+Oracle Linux 9 uses `firewalld`. Since IT handles HTTPS, port 443 may already be open; verify before adding rules:
+
+```bash
+sudo firewall-cmd --list-services
+# If output already includes: https   → nothing to do
+# If not, open it:
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --reload
+sudo firewall-cmd --list-services   # should now include: https
+```
+
+Port 8501 stays localhost-only (Nginx reaches it internally — never expose it externally).
+
+**University network security group**: On this VM, IT have already configured port 443 access at the network level. If deploying on a different VM, contact IT to confirm HTTPS is allowed inbound.
+
+---
+
+### Step 10 — Verify the Deployment
 
 From another machine on the university network, open a browser and navigate to:
 
 ```
-http://<vm-ip-address>:8501
+https://shinytest.mvls.gla.ac.uk/probedesign/
 ```
 
-You should see the ProbeDesign Streamlit interface.
+- HTTP (`http://...`) automatically redirects to HTTPS (IT's config)
+- `/probedesign` without a trailing slash redirects to `/probedesign/` (our `location = /probedesign` block)
+- The R Shiny server continues to work on all other paths (IT's `location /` catch-all is unaffected)
 
 **Test a probe design run:**
 
@@ -389,7 +565,7 @@ When new features are pushed to the repository:
 
 ```bash
 # SSH into the VM
-cd ~/GitHub/smFISHProbeDesign
+cd ~/Github/smFISHProbeDesign
 
 # Pull latest changes
 git pull origin master
@@ -411,7 +587,7 @@ sudo systemctl status probedesign
 **Quick update** (if only Python code changed, no new dependencies):
 
 ```bash
-cd ~/GitHub/smFISHProbeDesign
+cd ~/Github/smFISHProbeDesign
 git pull origin master
 sudo systemctl restart probedesign
 ```
@@ -494,12 +670,46 @@ which bowtie
 
 ### App accessible on VM but not from other machines
 
-1. **OS firewall**: Verify port 8501 is open:
-   ```bash
-   sudo firewall-cmd --list-ports
-   ```
-2. **Network security group**: Contact IT — the VM's cloud/network security group may block the port.
-3. **Streamlit binding**: Ensure `--server.address 0.0.0.0` (not `127.0.0.1`) in the service file.
+Work through these in order:
+
+**1. Test from inside the VM first:**
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost/probedesign/
+```
+- `301` or `200` → Nginx routing works locally; the issue is external connectivity or HTTPS
+- `502` → Nginx routing works but can't reach Streamlit (check SELinux, check service is running)
+- `404` → Nginx not routing to our location block (check config)
+
+**2. Check if the response is an HTTP→HTTPS redirect:**
+```bash
+curl -v http://localhost/probedesign/ 2>&1 | grep "Location:"
+```
+If `Location: https://...` appears, IT's config is redirecting all HTTP to HTTPS. Everything must be configured on the HTTPS (port 443) server block — a port-80-only config will never be reached.
+
+**3. Check for IT's existing nginx config:**
+```bash
+ls /etc/nginx/conf.d/
+sudo grep -rn "return 301\|listen 443\|ssl_certificate" /etc/nginx/conf.d/
+```
+If IT has a file with `return 301 https://` on port 80 and a `listen 443 ssl` block, your location blocks must go inside that HTTPS server block (see Step 8d).
+
+**4. Check for conflicting `server_name` or `default_server`:**
+```bash
+sudo nginx -T 2>/dev/null | grep -n "server_name\|listen\|default_server"
+```
+`[warn] conflicting server name` is harmless. `[emerg] duplicate default server` means two server blocks both have `default_server` on the same port — remove one.
+
+**5. SELinux blocking Nginx → Streamlit connection:**
+```bash
+getsebool httpd_can_network_connect
+# If "off": sudo setsebool -P httpd_can_network_connect on
+```
+
+**6. Nginx status and logs:**
+```bash
+sudo systemctl status nginx
+sudo tail -20 /var/log/nginx/error.log
+```
 
 ### Genome masking causes OOM kill
 
@@ -547,7 +757,7 @@ curl -s http://localhost:8501 | head -5
 If someone edited files directly on the VM:
 
 ```bash
-cd ~/GitHub/smFISHProbeDesign
+cd ~/Github/smFISHProbeDesign
 
 # Option 1: Stash local changes, pull, then reapply
 git stash
@@ -614,63 +824,6 @@ RepeatMasker will now be detected automatically by the app's prerequisite check.
 
 ---
 
-## Optional: Nginx Reverse Proxy (Later)
-
-If you later want to add HTTPS, a clean URL (no `:8501` port), or basic authentication, you can put Nginx in front of Streamlit.
-
-### 1. Install Nginx
-
-```bash
-sudo dnf install -y nginx
-sudo systemctl enable --now nginx
-```
-
-### 2. Create Nginx config
-
-```bash
-sudo tee /etc/nginx/conf.d/probedesign.conf > /dev/null << 'NGINXEOF'
-server {
-    listen 80;
-    server_name <vm-hostname-or-ip>;
-
-    location / {
-        proxy_pass http://127.0.0.1:8501;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 86400;
-    }
-}
-NGINXEOF
-```
-
-### 3. Update Streamlit to bind to localhost only
-
-Edit the systemd service file to change `--server.address 0.0.0.0` to `--server.address 127.0.0.1` so only Nginx can reach Streamlit.
-
-### 4. Open port 80 and close 8501
-
-```bash
-sudo firewall-cmd --permanent --add-service=http
-sudo firewall-cmd --permanent --remove-port=8501/tcp
-sudo firewall-cmd --reload
-```
-
-### 5. Restart services
-
-```bash
-sudo systemctl restart probedesign
-sudo systemctl restart nginx
-```
-
-Access via `http://<vm-hostname-or-ip>` (no port number).
-
----
-
 ## Quick Reference
 
 | Task | Command |
@@ -682,10 +835,11 @@ Access via `http://<vm-hostname-or-ip>` (no port number).
 | Check service | `sudo systemctl status probedesign` |
 | Restart service | `sudo systemctl restart probedesign` |
 | View live logs | `sudo journalctl -u probedesign -f` |
-| Update app | `cd ~/GitHub/smFISHProbeDesign && git pull origin master && sudo systemctl restart probedesign` |
+| Update app | `cd ~/Github/smFISHProbeDesign && git pull origin master && sudo systemctl restart probedesign` |
 | Update env | `micromamba activate probedesign && micromamba env update -n probedesign -f environment.yml --prune -y && pip install -e . && sudo systemctl restart probedesign` |
 | Check memory | `free -m` |
-| Check port | `ss -tlnp \| grep 8501` |
-| Check firewall | `sudo firewall-cmd --list-ports` |
-| Verify index dir | `ls ~/GitHub/smFISHProbeDesign/bowtie_indexes/*.1.bt2 \| wc -l` |
-| App URL | `http://<vm-ip>:8501` |
+| Check Nginx status | `sudo systemctl status nginx` |
+| Reload Nginx config | `sudo nginx -t && sudo systemctl restart nginx` |
+| Check firewall | `sudo firewall-cmd --list-services` |
+| Verify index dir | `ls ~/Github/smFISHProbeDesign/bowtie_indexes/*.1.bt2 \| wc -l` |
+| App URL | `https://shinytest.mvls.gla.ac.uk/probedesign/` |
