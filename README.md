@@ -10,6 +10,7 @@ ProbeDesign creates oligonucleotide probes for single molecule RNA FISH experime
 - **Sequence masking** — avoids cross-hybridization to pseudogenes, repeats, and repetitive genomic regions
 - **Optimal spacing** — uses dynamic programming to find the best probe placements
 - **Mixed-length probes** — variable-length oligos (e.g. 18-22 bp) to maximise probe count on GC-variable sequences
+- **Low-complexity filtering** — excludes probes with homopolymer or dinucleotide repeats (L-mask)
 
 ## Development Status
 
@@ -18,10 +19,12 @@ ProbeDesign creates oligonucleotide probes for single molecule RNA FISH experime
 - ✅ Batch mode for CLI and GUI
 - ✅ Allow bowtie result output
 - ✅ Implement automated mixed-length probe design compatible with dynamic programming
+- ✅ Test streamlit application hosting on Glasgow VM
+- ✅ Implement homopolymer/dinucleotide filter
 
 **In Development / Planned**
 - [ ] Test local RepeatMasker installation
-- [ ] Implement homopolymer filter
+- [ ] Implement HCRv3 probe design algorithms from the RShiny scripts
 - [ ] Implement hairpin structure & inter-probe duplex formation filters
 
 ---
@@ -209,6 +212,12 @@ Options:
   --index-dir DIRECTORY           Directory containing bowtie indexes (default: auto-detect)
   --repeatmask-file PATH          FASTA file with N's marking repeat regions (manual masking)
   --repeatmask / --no-repeatmask  Run RepeatMasker automatically to mask repeats  [default: off]
+  --hp-threshold INTEGER          Homopolymer repeat threshold for L-mask (probes with
+                                  single-nucleotide runs >= this length are excluded)
+                                  [default: 5; range: 3-10]
+  --di-threshold INTEGER          Dinucleotide repeat threshold for L-mask (probes with
+                                  dinucleotide motifs repeated >= this many times are
+                                  excluded)  [default: 3; range: 3-10]
   --save-bowtie-raw               Save raw bowtie alignment output (produces large files)
   --help                          Show this message and exit.
 ```
@@ -274,6 +283,10 @@ Masking removes probe candidates that would hybridize non-specifically.
 ### Genome Masking (B Mask) — `--genome-mask`
 
 Three bowtie searches (12/14/16-mers) against the whole genome with tiered hit-count thresholds.
+
+### Low-Complexity Filtering (L Mask) — always active
+
+Probes containing homopolymer runs (e.g. `AAAAA`) or dinucleotide repeats (e.g. `ACACAC`) are excluded. Thresholds are adjustable via `--hp-threshold` (default 5) and `--di-threshold` (default 3).
 
 ### Supported Species
 

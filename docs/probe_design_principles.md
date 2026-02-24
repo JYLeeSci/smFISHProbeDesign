@@ -12,6 +12,7 @@
 2. [Candidate Generation (Sliding Window)](#2-candidate-generation-sliding-window)
 3. [Thermodynamic Model](#3-thermodynamic-model)
 4. [Thermodynamic Filtering (F Mask)](#4-thermodynamic-filtering-f-mask)
+4B. [Low-Complexity Filtering (L Mask)](#4b-low-complexity-filtering-l-mask)
 5. [What Is NOT Checked](#5-what-is-not-checked)
 6. [Specificity Filtering (Masking)](#6-specificity-filtering-masking)
    - [6A. Repeat Masking (R Mask)](#6a-repeat-masking-r-mask)
@@ -42,6 +43,9 @@ Input FASTA
     v
 [4] Create F Mask (positions where badness == inf, BEFORE other masks)
     |                                                       Code: core.py:262-340
+    v
+[4b] Create L Mask (low-complexity: homopolymers & dinucleotide repeats)
+    |                                                       Code: core.py
     v
 [5] Apply Optional Masks (in order):
     |   (a) R mask — repeat regions (N's in input or separate file or RepeatMasker)
@@ -225,6 +229,41 @@ Characters that trigger `inf` badness: `x`, `X`, `m`, `M`, `h`, `H`, `p`, `P`, `
 
 ---
 
+### 4B. Low-Complexity Filtering (L Mask)
+
+The L mask identifies candidate probes containing low-complexity subsequences — specifically homopolymer runs and dinucleotide repeats. Unlike the nucleotide-level R/P/B masks, the L mask operates at the **probe level**: each candidate probe substring is evaluated independently.
+
+The L mask is **always active** (no CLI flag to enable/disable it). It modifies the badness array directly (setting matching entries to `inf`), using the same architecture as the F mask. It does **not** write to the `full_mask[]` array used by R/P/B masks.
+
+#### Checks Performed
+
+| Check | What it detects | Default threshold | CLI flag | Range |
+|-|-|-|-|-|
+| Homopolymer run | Consecutive identical bases (e.g. `AAAAA`) | 5 | `--hp-threshold` | 3-10 |
+| Dinucleotide repeat | Repeating two-base motif (e.g. `ACACAC`) | 3 | `--di-threshold` | 3-10 |
+
+A candidate probe is rejected (`badness = inf`) if it contains a homopolymer run of length >= `hp_threshold` **or** a dinucleotide repeat of >= `di_threshold` units.
+
+#### Fixed-Length Mode
+
+For a single oligo length `k`, the algorithm checks each probe `seq[i : i + k]`. If the probe fails either low-complexity check, `badness[i] = inf`.
+
+#### Mixed-Length Mode
+
+In mixed-length mode, each `(position, length)` pair in the 2D badness table is checked independently. A shorter probe that does not reach a low-complexity region is preserved even if a longer probe at the same start position is rejected. This mirrors the per-cell independence of the F mask in mixed mode.
+
+#### Examples
+
+With default thresholds (`hp_threshold=5`, `di_threshold=3`):
+
+```
+ATCGAAAAATCGATCG    → rejected (homopolymer: AAAAA, run of 5)
+ATCGACACACGATCG     → rejected (dinucleotide: ACACAC, 3 repeats of AC)
+ATCGAAAATCGATCGA    → accepted (AAAA is only 4, below threshold of 5)
+```
+
+---
+
 ## 5. What Is NOT Checked
 
 The following criteria are **not used** in probe selection or filtering:
@@ -233,7 +272,6 @@ The following criteria are **not used** in probe selection or filtering:
 |-----------|--------|-------|
 | **GC content (%)** | Reported, not filtered | GC% is computed and printed in output but does NOT affect the badness score or filtering |
 | **Melting temperature (Tm)** | Reported, not filtered | Tm is computed and printed but does NOT affect scoring; ΔG filtering acts as an indirect Tm filter |
-| **Homopolymer runs** | Not checked | No penalty for poly-A, poly-T, poly-G, or poly-C stretches |
 | **Self-dimers** | Not checked | No analysis of probe self-complementarity |
 | **Hairpins / secondary structure** | Not checked | No folding prediction (e.g., no mfold/UNAfold integration) |
 | **Cross-hybridization between probes** | Not checked | Probes are designed independently; no pairwise dimer check |
@@ -462,7 +500,8 @@ For each selected position `i`:
 | 2 | R mask (if repeat masking used): `R` = masked, sequence char = unmasked |
 | 3 | P mask (if pseudogene masking used): `P` = masked |
 | 4 | B mask (if genome masking used): `B` = masked |
-| Last mask | F mask (always present): `F` = inf badness, sequence char = valid |
+| Next | F mask (always present): `F` = inf badness, sequence char = valid |
+| Next | L mask (always present): `L` = low-complexity rejected, sequence char = valid |
 | Below | Probe complementary sequences and labels: `Prb# N,FE value,GC%` |
 
 **Code reference:** `src/probedesign/output.py`
@@ -488,6 +527,8 @@ For each selected position `i`:
 | Index directory | `bowtie_indexes/` | `--index-dir PATH` | Directory containing bowtie indexes | `cli.py`, `masking.py:19` |
 | Repeat mask file | (none) | `--repeatmask-file PATH` | FASTA with N's marking repeat regions | `cli.py` |
 | Auto repeat mask | off | `--repeatmask` | Run RepeatMasker automatically | `cli.py` |
+| Homopolymer threshold | 5 | `--hp-threshold` | Reject probes with homopolymer runs >= this length (3-10) | `cli.py`, `core.py` |
+| Dinucleotide repeat threshold | 3 | `--di-threshold` | Reject probes with dinucleotide repeats >= this many units (3-10) | `cli.py`, `core.py` |
 
 ### Hard-Coded Constants (Not Configurable via CLI)
 

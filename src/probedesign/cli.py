@@ -96,6 +96,20 @@ def main():
     default=False,
     help='Save raw bowtie alignment output (large files)'
 )
+@click.option(
+    '--hp-threshold',
+    default=5,
+    type=click.IntRange(3, 10),
+    help='Homopolymer repeat threshold for L-mask (default: 5, range: 3-10). '
+         'Probes containing single-nucleotide runs >= this length are excluded.'
+)
+@click.option(
+    '--di-threshold',
+    default=3,
+    type=click.IntRange(3, 10),
+    help='Dinucleotide repeat threshold for L-mask (default: 3, range: 3-10). '
+         'Probes containing dinucleotide motifs repeated >= this many times are excluded.'
+)
 def design(
     input_file: str,
     n_probes: int,
@@ -112,6 +126,8 @@ def design(
     repeatmask_file: str,
     repeatmask: bool,
     save_bowtie_raw: bool,
+    hp_threshold: int,
+    di_threshold: int,
 ):
     """Design probes for a target sequence.
 
@@ -223,6 +239,8 @@ def design(
         repeatmask_file=actual_repeatmask_file,
         save_bowtie_raw=save_bowtie_raw,
         mixed_lengths=mixed_lengths,
+        hp_threshold=hp_threshold,
+        di_threshold=di_threshold,
     )
 
     if not result.probes:

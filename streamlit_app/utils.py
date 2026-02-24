@@ -285,6 +285,8 @@ def run_design(
     repeatmask_file: Optional[str] = None,
     save_bowtie_raw: bool = False,
     mixed_lengths: Optional[Tuple[int, int]] = None,
+    hp_threshold: int = 5,
+    di_threshold: int = 3,
 ) -> DesignRunResult:
     """Run probe design, replicating the CLI orchestration logic.
 
@@ -326,6 +328,8 @@ def run_design(
                 repeatmask_file=actual_repeatmask_file,
                 save_bowtie_raw=save_bowtie_raw,
                 mixed_lengths=mixed_lengths,
+                hp_threshold=hp_threshold,
+                di_threshold=di_threshold,
             )
 
         if not result.probes:
@@ -427,6 +431,8 @@ def run_batch(
             repeatmask_file=params.get("repeatmask_file"),
             save_bowtie_raw=params.get("save_bowtie_raw", False),
             mixed_lengths=params.get("mixed_lengths"),
+            hp_threshold=params.get("hp_threshold", 5),
+            di_threshold=params.get("di_threshold", 3),
         )
 
         if run_result.result is not None and run_result.result.probes:

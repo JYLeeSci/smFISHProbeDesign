@@ -70,6 +70,12 @@ with st.sidebar:
     st.write("")
 
     # Basic parameters
+    species = st.selectbox(
+        "Species",
+        ["human", "mouse", "elegans", "drosophila", "rat"],
+        key="species",
+    )
+    
     n_probes = st.number_input(
         "Number of probes",
         min_value=1, value=48, step=1,
@@ -136,15 +142,32 @@ with st.sidebar:
             key="gibbs_max",
         )
 
-    species = st.selectbox(
-        "Species",
-        ["human", "mouse", "elegans", "drosophila", "rat"],
-        key="species",
-    )
+    
+
+    st.divider()
+
+    # Low-complexity filter — always active
+    st.markdown("Low-complexity filter")
+    col_hp, col_di = st.columns(2)
+    with col_hp:
+        hp_threshold = st.number_input(
+            "Homopolymer repeats",
+            min_value=3, max_value=10, value=5, step=1,
+            key="hp_threshold",
+            help="Mask probes containing single-nucleotide runs of this length or longer (e.g. AAAAA at threshold 5)",
+        )
+    with col_di:
+        di_threshold = st.number_input(
+            "Dinucleotide repeats",
+            min_value=3, max_value=10, value=3, step=1,
+            key="di_threshold",
+            help="Mask probes containing dinucleotide motifs repeated this many times or more (e.g. ATATAT at threshold 3)",
+        )
 
     st.divider()
 
     # Bowtie masking — prominent, on by default
+    st.markdown("Off-target filter")
     pseudogene_mask_on = st.checkbox(
         "Pseudogene mask", value=True, key="pseudogene_mask",
         help="Masking against pseudogenes"
@@ -169,8 +192,6 @@ with st.sidebar:
         key="save_bowtie_raw",
         help="Include full bowtie alignment files in downloads",
     )
-
-    st.divider()
 
     # RepeatMasker — advanced, hidden by default
     with st.expander("Advanced RepeatMasker options", expanded=False):
@@ -446,6 +467,8 @@ if mode == "Single sequence":
                 repeatmask_file=rm_file,
                 save_bowtie_raw=save_bowtie_raw,
                 mixed_lengths=mixed_lengths,
+                hp_threshold=hp_threshold,
+                di_threshold=di_threshold,
             )
 
         st.session_state["single_result"] = run_result
@@ -556,6 +579,8 @@ else:
             "repeatmask_file": rm_file,
             "save_bowtie_raw": save_bowtie_raw,
             "mixed_lengths": mixed_lengths,
+            "hp_threshold": hp_threshold,
+            "di_threshold": di_threshold,
         }
 
         # Run batch with progress

@@ -19,6 +19,51 @@ from typing import List, Optional, Tuple
 DEFAULT_INDEX_DIR = Path(__file__).parent.parent.parent.parent / "bowtie_indexes"
 
 
+def has_homopolymer(subseq: str, threshold: int = 4) -> bool:
+    """Return True if subseq contains a single-nucleotide run >= threshold.
+
+    Only counts runs of a/c/g/t. Characters like '>', 'n' break runs.
+    """
+    if threshold < 1 or len(subseq) < threshold:
+        return False
+    count = 1
+    for i in range(1, len(subseq)):
+        if subseq[i] in 'acgt' and subseq[i] == subseq[i - 1]:
+            count += 1
+            if count >= threshold:
+                return True
+        else:
+            count = 1
+    return False
+
+
+def has_dinucleotide_repeat(subseq: str, threshold: int = 3) -> bool:
+    """Return True if subseq contains any dinucleotide motif repeated >= threshold times.
+
+    Checks all 12 ordered dinucleotide pairs (AT, TA, AC, CA, AG, GA,
+    TC, CT, TG, GT, GC, CG). Only considers a/c/g/t characters.
+
+    A threshold of 3 means the 2-nt motif appears 3+ times consecutively
+    (i.e. 6+ nucleotides, e.g. ATATAT).
+    """
+    min_span = threshold * 2
+    if len(subseq) < min_span:
+        return False
+
+    for i in range(len(subseq) - 1):
+        a, b = subseq[i], subseq[i + 1]
+        if a not in 'acgt' or b not in 'acgt' or a == b:
+            continue
+        count = 1
+        j = i + 2
+        while j + 1 < len(subseq) and subseq[j] == a and subseq[j + 1] == b:
+            count += 1
+            j += 2
+        if count >= threshold:
+            return True
+    return False
+
+
 def find_bowtie() -> str:
     """Find the bowtie executable.
 

@@ -387,6 +387,8 @@ def design_probes(
     repeatmask_file: Optional[str] = None,
     save_bowtie_raw: bool = False,
     mixed_lengths: Optional[Tuple[int, int]] = None,
+    hp_threshold: int = 5,
+    di_threshold: int = 3,
 ) -> ProbeDesignResult:
     """Design oligonucleotide probes for a target sequence.
 
@@ -539,6 +541,41 @@ def design_probes(
         fstr = "".join(fstr_parts)
         mask_strings.append(fstr)
 
+        # --- L-mask: low-complexity filtering (always active, per-length) ---
+        from .masking import has_homopolymer, has_dinucleotide_repeat
+        l_masked_count = 0
+        lstr_parts = []
+        for i in range(len(seq)):
+            if i < max_goodlen:
+                any_length_masked = False
+                for L_idx in range(n_lengths):
+                    L = min_len + L_idx
+                    if i + L > len(seq):
+                        continue
+                    if badness_2d[i][L_idx] == float('inf'):
+                        continue  # already excluded by F-mask
+                    probe_sub = seq[i:i + L]
+                    if (has_homopolymer(probe_sub, hp_threshold)
+                            or has_dinucleotide_repeat(probe_sub, di_threshold)):
+                        badness_2d[i][L_idx] = float('inf')
+                        l_masked_count += 1
+                        any_length_masked = True
+                # Visualization: 'L' only if ALL lengths are now dead
+                # and at least one was killed by L-mask (not just F-mask)
+                any_viable = any(
+                    badness_2d[i][L_idx] != float('inf')
+                    for L_idx in range(n_lengths)
+                    if i + min_len + L_idx <= len(seq)
+                )
+                lstr_parts.append('L' if not any_viable and any_length_masked else seq[i])
+            else:
+                lstr_parts.append(seq[i])
+        lstr = "".join(lstr_parts)
+        mask_strings.append(lstr)
+        if l_masked_count > 0:
+            print(f"Low-complexity masking: {l_masked_count} (position,length) pairs masked "
+                  f"(homopolymer>={hp_threshold}, dinucleotide>={di_threshold})")
+
         # Apply mask to 2D badness (after F mask is created)
         if any(full_mask):
             from .masking import mask_to_badness_mixed
@@ -562,6 +599,29 @@ def design_probes(
                 fstr_parts.append('F')
         fstr = "".join(fstr_parts)
         mask_strings.append(fstr)
+
+        # --- L-mask: low-complexity filtering (always active, probe-level) ---
+        from .masking import has_homopolymer, has_dinucleotide_repeat
+        l_masked_count = 0
+        lstr_parts = []
+        for i in range(len(seq)):
+            if i < goodlen:
+                probe_sub = seq[i:i + oligo_length]
+                if badness[i] != float('inf') and (
+                        has_homopolymer(probe_sub, hp_threshold)
+                        or has_dinucleotide_repeat(probe_sub, di_threshold)):
+                    badness[i] = float('inf')
+                    l_masked_count += 1
+                    lstr_parts.append('L')
+                else:
+                    lstr_parts.append(seq[i])
+            else:
+                lstr_parts.append(seq[i])
+        lstr = "".join(lstr_parts)
+        mask_strings.append(lstr)
+        if l_masked_count > 0:
+            print(f"Low-complexity masking: {l_masked_count} probe positions masked "
+                  f"(homopolymer>={hp_threshold}, dinucleotide>={di_threshold})")
 
         # Apply mask to badness (after F mask is created)
         if any(full_mask):

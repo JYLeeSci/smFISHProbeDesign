@@ -2,6 +2,44 @@
 
 This file provides context for Claude Code when working on this project.
 
+## Context Efficiency
+
+### Subagent Discipline
+
+**Context-aware delegation:**
+ - Under ~50k context: prefer inline work for tasks under ~5 tool calls.
+ - Over ~50k context: prefer subagents for self-contained tasks, even simple ones — the per-call token tax on large contexts adds up fast.
+
+When using subagents, include output rules: "Final response under 2000 characters. List outcomes, not process."
+Never call TaskOutput twice for the same subagent. If it times out, increase the timeout — don't re-read.
+
+### File Reading
+Read files with purpose. Before reading a file, know what you're looking for.
+Use Grep to locate relevant sections before reading entire large files.
+Never re-read a file you've already read in this session.
+For files over 500 lines, use offset/limit to read only the relevant section.
+
+### Responses
+Don't echo back file contents you just read — the user can see them.
+Don't narrate tool calls ("Let me read the file..." / "Now I'll edit..."). Just do it.
+Keep explanations proportional to complexity. Simple changes need one sentence, not three paragraphs.
+
+**Tables — STRICT RULES (apply everywhere, always):**
+- Markdown tables: use minimum separator (`|-|-|`). Never pad with repeated hyphens (`|---|---|`).
+- NEVER use box-drawing / ASCII-art tables with characters like `┌`, `┬`, `─`, `│`, `└`, `┘`, `├`, `┤`, `┼`. These are completely banned.
+- No exceptions. Not for "clarity", not for alignment, not for terminal output.
+
+**Parallel tool calls — the biggest efficiency lever:**                                                                              
+- Always batch independent tool calls in a single message                                                                            
+- Only sequence calls when one depends on another's output                                                                           
+- Common patterns to parallelize:                                                                                                    
+  - After Glob/Grep returns N files: read all of them in one batch                                                                   
+  - Starting investigation: speculatively read multiple likely-relevant files at once instead of read-one-then-decide                
+- Git commit prep: `git status`, `git diff`, and `git log` in one message                                                          
+- Subagent launches: fire all independent subagents in a single message                                                            
+- Multiple edits to different files: batch them      
+
+
 ## Project Overview
 
 ProbeDesign designs oligonucleotide probes for single molecule RNA FISH experiments. Originally written in MATLAB (`probedesign/findprobesLocal.m`), the active development is now the **Python implementation** with a **Streamlit web app** as the primary user interface.
@@ -53,7 +91,7 @@ smFISHProbeDesign/
 | `cli.py` | Click-based CLI; parses `--oligo-length` as int or range (e.g. `18-22`) |
 | `core.py` | Main algorithm: badness calculation, DP optimization, mixed-length support |
 | `thermodynamics.py` | Gibbs free energy and Tm calculations (Sugimoto 1995 params) |
-| `masking.py` | Bowtie-based masking (pseudogene, genome), RepeatMasker, mixed-length mask support |
+| `masking.py` | Bowtie-based masking (pseudogene, genome), RepeatMasker, low-complexity (`has_homopolymer()`, `has_dinucleotide_repeat()`), mixed-length mask support |
 | `sequence.py` | Sequence utilities (reverse complement, GC%, validation) |
 | `fasta.py` | FASTA file I/O with junction marker handling |
 | `output.py` | Output file generation (_oligos.txt, _seq.txt) |
@@ -75,7 +113,7 @@ streamlit run streamlit_app/app.py
 - **Single sequence mode**: Upload or paste a FASTA file, design probes interactively
 - **Batch mode**: Process multiple FASTA files from a directory or upload, write results to an output directory
 - **Mixed-length support**: Toggle "Mixed range" in sidebar to use variable-length probes (e.g. 18-22bp)
-- **Masking options**: Pseudogene mask, genome mask, RepeatMasker (auto or file)
+- **Masking options**: Pseudogene mask, genome mask, RepeatMasker (auto or file), low-complexity filter (homopolymer/dinucleotide thresholds)
 - **Downloads**: `_oligos.txt`, `_seq.txt`, bowtie hit files, batch summary TSV
 
 **Parameter flow**:
@@ -122,6 +160,7 @@ Sidebar UI (app.py) → run_batch() (utils.py) → run_design() per file → des
    - P mask: Pseudogene alignments (bowtie to pseudogene DBs)
    - B mask: Genome alignments (bowtie to genome, tiered stringencies)
    - F mask: Thermodynamic filtering (badness == inf)
+   - L mask: Low-complexity filtering (homopolymer runs, dinucleotide repeats) — probe-level
 4. **Dynamic programming**: Find optimal probe placements minimizing average badness
    - Fixed-length: start-position DP with fixed spacing
    - Mixed-length: end-position DP to handle variable probe spacing
@@ -177,6 +216,13 @@ Probes of varying lengths (e.g. 18-22bp) instead of a single fixed length. Maxim
 - Install via conda: `mamba install -c bioconda -c conda-forge repeatmasker`
 - Requires Dfam database partitions: Human/Mouse/Rat need Partition 7 (~8.9GB compressed, ~56GB extracted)
 - See [docs/REPEATMASKER.md](docs/REPEATMASKER.md)
+
+### L mask (Low-complexity)
+
+- Always active by default — operates at probe level (not nucleotide level)
+- Rejects probes containing homopolymer runs (e.g. `AAAAA`) or dinucleotide repeats (e.g. `ATATAT`)
+- CLI: `--hp-threshold` (default 5, range 3-10), `--di-threshold` (default 3, range 3-10)
+- In `_seq.txt` output, masked probes show `L` at the probe's start position
 
 ## Output Format
 
