@@ -271,6 +271,221 @@ def design(
 @main.command()
 @click.argument('input_file', type=click.Path(exists=True))
 @click.option(
+    '-p', '--pairs', 'n_pairs',
+    default=30,
+    type=int,
+    help='Number of probe pairs to design (default: 30)'
+)
+@click.option(
+    '-a', '--amplifier',
+    default='B1',
+    type=click.Choice(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'B9', 'B10', 'B11', 'B13', 'B14', 'B15', 'B17']),
+    help='HCR amplifier (default: B1)'
+)
+@click.option(
+    '-g', '--target-gibbs',
+    default=-31.0,
+    type=float,
+    help='Target ΔG per 25-nt half in kcal/mol (default: -31.0)'
+)
+@click.option(
+    '--allowable-gibbs',
+    default='-35,-27',
+    type=str,
+    help='Strict ΔG range as min,max (default: -35,-27)'
+)
+@click.option(
+    '--asymmetric-gibbs',
+    is_flag=True,
+    default=False,
+    help='Enable asymmetric ΔG leniency (one half strict, one lenient)'
+)
+@click.option(
+    '--lenient-gibbs-min',
+    default=-42.0,
+    type=float,
+    help='Floor ΔG for lenient half (default: -42.0, only with --asymmetric-gibbs)'
+)
+@click.option(
+    '--asymmetric-bowtie',
+    is_flag=True,
+    default=False,
+    help='Enable asymmetric bowtie filtering (at least one half clean)'
+)
+@click.option(
+    '--pair-spacing',
+    default=2,
+    type=int,
+    help='Minimum gap between consecutive 52-nt pair blocks (default: 2)'
+)
+@click.option(
+    '-s', '--species',
+    default='human',
+    type=click.Choice(['human', 'mouse', 'elegans', 'drosophila', 'rat']),
+    help='Species for masking databases (default: human)'
+)
+@click.option(
+    '--pseudogene-mask/--no-pseudogene-mask',
+    default=False,
+    help='Mask pseudogene alignments (default: off)'
+)
+@click.option(
+    '--genome-mask/--no-genome-mask',
+    default=False,
+    help='Mask genome alignments (default: off)'
+)
+@click.option(
+    '--index-dir',
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help='Directory containing bowtie indexes'
+)
+@click.option(
+    '--repeatmask-file',
+    default=None,
+    type=click.Path(exists=True),
+    help='FASTA file with N\'s marking repeat regions'
+)
+@click.option(
+    '--hp-threshold',
+    default=5,
+    type=click.IntRange(3, 10),
+    help='Homopolymer run threshold (default: 5)'
+)
+@click.option(
+    '--di-threshold',
+    default=3,
+    type=click.IntRange(3, 10),
+    help='Dinucleotide repeat threshold (default: 3)'
+)
+@click.option(
+    '--resolve-spacer',
+    default=None,
+    type=str,
+    help='Resolve WW spacer to explicit bases (e.g. AA, TT). Default: output WW as IUPAC'
+)
+@click.option(
+    '-o', '--output',
+    default=None,
+    type=str,
+    help='Output file prefix (default: derived from input filename)'
+)
+@click.option(
+    '--save-bowtie-raw',
+    is_flag=True,
+    default=False,
+    help='Save raw bowtie alignment output'
+)
+@click.option(
+    '--quiet', '-q',
+    is_flag=True,
+    help='Suppress output to stdout'
+)
+def hcrdesign(
+    input_file: str,
+    n_pairs: int,
+    amplifier: str,
+    target_gibbs: float,
+    allowable_gibbs: str,
+    asymmetric_gibbs: bool,
+    lenient_gibbs_min: float,
+    asymmetric_bowtie: bool,
+    pair_spacing: int,
+    species: str,
+    pseudogene_mask: bool,
+    genome_mask: bool,
+    index_dir: str,
+    repeatmask_file: str,
+    hp_threshold: int,
+    di_threshold: int,
+    resolve_spacer: str,
+    output: str,
+    save_bowtie_raw: bool,
+    quiet: bool,
+):
+    """Design HCR split-initiator probe pairs for a target sequence.
+
+    INPUT_FILE is a FASTA file containing the target sequence.
+
+    Each probe pair consists of two 25-nt probes (P1+P2) separated by a
+    2-nt gap on the target, with half-initiator sequences for HCR signal
+    amplification.
+
+    Examples:
+
+        probedesign hcrdesign input.fa --pairs 20 --amplifier B1
+
+        probedesign hcrdesign input.fa -p 25 -a B2 --asymmetric-gibbs
+
+        probedesign hcrdesign input.fa -p 30 -a B9 --resolve-spacer AA
+    """
+    from .hcr import design_hcr_probes
+    from .hcr_output import write_hcr_output_files, format_hcr_oligos
+
+    # Parse allowable Gibbs range
+    try:
+        min_gibbs, max_gibbs = map(float, allowable_gibbs.split(','))
+    except ValueError:
+        raise click.BadParameter(
+            f"Invalid format for --allowable-gibbs: {allowable_gibbs}. "
+            "Expected format: min,max (e.g., -35,-27)"
+        )
+
+    # Determine output prefix
+    if output is None:
+        output = Path(input_file).stem
+
+    if not quiet:
+        click.echo(f"Designing HCR probe pairs for {input_file}...")
+        click.echo(f"  Amplifier: {amplifier}, Pairs: {n_pairs}, Spacing: {pair_spacing}")
+        if asymmetric_gibbs:
+            click.echo(f"  Asymmetric ΔG: lenient floor = {lenient_gibbs_min}")
+        if asymmetric_bowtie:
+            click.echo(f"  Asymmetric bowtie: enabled")
+
+    result = design_hcr_probes(
+        input_file=input_file,
+        n_pairs=n_pairs,
+        amplifier=amplifier,
+        target_gibbs=target_gibbs,
+        strict_range=(min_gibbs, max_gibbs),
+        asymmetric_gibbs=asymmetric_gibbs,
+        lenient_gibbs_min=lenient_gibbs_min,
+        asymmetric_bowtie=asymmetric_bowtie,
+        pair_spacing=pair_spacing,
+        species=species,
+        pseudogene_mask=pseudogene_mask,
+        genome_mask=genome_mask,
+        index_dir=index_dir,
+        repeatmask_file=repeatmask_file,
+        hp_threshold=hp_threshold,
+        di_threshold=di_threshold,
+        resolve_spacer=resolve_spacer,
+        output_name=output,
+        save_bowtie_raw=save_bowtie_raw,
+    )
+
+    if not result.pairs:
+        click.echo("ERROR: Could not find any valid HCR probe pairs.", err=True)
+        raise SystemExit(1)
+
+    # Write output files
+    write_hcr_output_files(result, output)
+
+    # Print summary
+    if not quiet:
+        click.echo(f"\nFound {len(result.pairs)} HCR probe pairs (score: {result.score:.4f})")
+        click.echo(f"\nOutput files:")
+        click.echo(f"  {output}_HCR_oligos.txt")
+        click.echo(f"  {output}_HCR_seq.txt")
+        click.echo(f"  {output}_HCR_hits.txt")
+        click.echo(f"\nProbe pairs:")
+        click.echo(format_hcr_oligos(result))
+
+
+@main.command()
+@click.argument('input_file', type=click.Path(exists=True))
+@click.option(
     '-l', '--oligo-length',
     default=20,
     type=int,

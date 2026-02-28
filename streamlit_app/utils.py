@@ -17,6 +17,13 @@ from probedesign.output import (
     format_seq_content,
     format_hits_content,
 )
+from probedesign.hcr import design_hcr_probes, HCRDesignResult
+from probedesign.hcr_output import (
+    write_hcr_output_files,
+    format_hcr_oligos,
+    format_hcr_seq,
+    format_hcr_hits,
+)
 from probedesign.masking import find_bowtie, find_repeatmasker, run_repeatmasker
 
 
@@ -551,5 +558,228 @@ def package_batch_results_zip(results: List[BatchResult]) -> bytes:
                 )
 
         zf.writestr("batch_summary.tsv", format_batch_summary(results))
+
+    return buf.getvalue()
+
+
+# --- HCR Design runner ---
+
+
+@dataclass
+class HCRDesignRunResult:
+    result: Optional[HCRDesignResult] = None
+    stdout_log: str = ""
+    error: Optional[str] = None
+
+
+def run_hcr_design(
+    input_path: str,
+    n_pairs: int = 30,
+    amplifier: str = "B1",
+    target_gibbs: float = -31.0,
+    strict_range: Tuple[float, float] = (-35.0, -27.0),
+    asymmetric_gibbs: bool = False,
+    lenient_gibbs_min: float = -42.0,
+    asymmetric_bowtie: bool = False,
+    pair_spacing: int = 2,
+    species: str = "human",
+    pseudogene_mask: bool = False,
+    genome_mask: bool = False,
+    index_dir: Optional[str] = None,
+    repeatmask_file: Optional[str] = None,
+    repeatmask_mode: str = "none",
+    hp_threshold: int = 5,
+    di_threshold: int = 3,
+    resolve_spacer: Optional[str] = None,
+    output_name: Optional[str] = None,
+    save_bowtie_raw: bool = False,
+) -> HCRDesignRunResult:
+    """Run HCR probe design with stdout capture and error handling.
+
+    Analogous to run_design() for smFISH.
+
+    Returns:
+        HCRDesignRunResult with either result or error populated.
+    """
+    stdout_capture = io.StringIO()
+    try:
+        actual_repeatmask_file = repeatmask_file
+
+        if repeatmask_mode == "auto":
+            with redirect_stdout(stdout_capture):
+                print(f"Running RepeatMasker on {input_path}...")
+            masked_file = run_repeatmasker(Path(input_path), species=species)
+            actual_repeatmask_file = str(masked_file)
+            with redirect_stdout(stdout_capture):
+                print(f"RepeatMasker output: {masked_file}")
+
+        with redirect_stdout(stdout_capture):
+            result = design_hcr_probes(
+                input_file=input_path,
+                n_pairs=n_pairs,
+                amplifier=amplifier,
+                target_gibbs=target_gibbs,
+                strict_range=strict_range,
+                asymmetric_gibbs=asymmetric_gibbs,
+                lenient_gibbs_min=lenient_gibbs_min,
+                asymmetric_bowtie=asymmetric_bowtie,
+                pair_spacing=pair_spacing,
+                species=species,
+                pseudogene_mask=pseudogene_mask,
+                genome_mask=genome_mask,
+                index_dir=index_dir,
+                repeatmask_file=actual_repeatmask_file,
+                hp_threshold=hp_threshold,
+                di_threshold=di_threshold,
+                resolve_spacer=resolve_spacer,
+                output_name=output_name,
+                save_bowtie_raw=save_bowtie_raw,
+            )
+
+        if not result.pairs:
+            return HCRDesignRunResult(
+                result=result,
+                stdout_log=stdout_capture.getvalue(),
+                error="No valid HCR probe pairs found. "
+                      "Try adjusting ΔG range or enabling asymmetric mode.",
+            )
+
+        return HCRDesignRunResult(
+            result=result,
+            stdout_log=stdout_capture.getvalue(),
+            error=None,
+        )
+
+    except Exception as e:
+        return HCRDesignRunResult(
+            result=None,
+            stdout_log=stdout_capture.getvalue(),
+            error=f"{type(e).__name__}: {e}",
+        )
+
+
+@dataclass
+class HCRBatchResult:
+    filename: str
+    n_pairs_found: int = 0
+    score: float = float('inf')
+    status: str = "pending"
+    error_msg: Optional[str] = None
+    result: Optional[HCRDesignResult] = None
+
+
+def run_hcr_batch(
+    fasta_paths: List[Path],
+    output_dir: Optional[str] = None,
+    params: dict = None,
+    progress_callback: Optional[Callable] = None,
+    name_overrides: Optional[Dict[Path, str]] = None,
+) -> List[HCRBatchResult]:
+    """Run HCR probe design on a list of FASTA files.
+
+    Analogous to run_batch() for smFISH.
+
+    Args:
+        fasta_paths: List of FASTA file paths to process
+        output_dir: Optional directory for output files
+        params: Dict of HCR design parameters
+        progress_callback: Optional callable(current_index, total, filename)
+        name_overrides: Optional dict mapping Path -> output name
+
+    Returns:
+        List of HCRBatchResult
+    """
+    if params is None:
+        params = {}
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    batch_results = []
+
+    for i, fasta_path in enumerate(fasta_paths):
+        resolved_output_name = (name_overrides or {}).get(fasta_path, fasta_path.stem)
+        fname = resolved_output_name
+
+        if progress_callback:
+            progress_callback(i, len(fasta_paths), fname)
+
+        run_result = run_hcr_design(
+            input_path=str(fasta_path),
+            n_pairs=params.get("n_pairs", 30),
+            amplifier=params.get("amplifier", "B1"),
+            target_gibbs=params.get("target_gibbs", -31.0),
+            strict_range=params.get("strict_range", (-35.0, -27.0)),
+            asymmetric_gibbs=params.get("asymmetric_gibbs", False),
+            lenient_gibbs_min=params.get("lenient_gibbs_min", -42.0),
+            asymmetric_bowtie=params.get("asymmetric_bowtie", False),
+            pair_spacing=params.get("pair_spacing", 2),
+            species=params.get("species", "human"),
+            pseudogene_mask=params.get("pseudogene_mask", False),
+            genome_mask=params.get("genome_mask", False),
+            index_dir=params.get("index_dir"),
+            repeatmask_mode=params.get("repeatmask_mode", "none"),
+            repeatmask_file=params.get("repeatmask_file"),
+            hp_threshold=params.get("hp_threshold", 5),
+            di_threshold=params.get("di_threshold", 3),
+            resolve_spacer=params.get("resolve_spacer"),
+            output_name=resolved_output_name,
+            save_bowtie_raw=params.get("save_bowtie_raw", False),
+        )
+
+        if run_result.result is not None and run_result.result.pairs:
+            if output_dir:
+                write_hcr_output_files(
+                    run_result.result,
+                    resolved_output_name,
+                    output_dir=output_dir,
+                )
+            batch_results.append(HCRBatchResult(
+                filename=fname,
+                n_pairs_found=len(run_result.result.pairs),
+                score=run_result.result.score,
+                status="success",
+                error_msg=None,
+                result=run_result.result,
+            ))
+        else:
+            batch_results.append(HCRBatchResult(
+                filename=fname,
+                n_pairs_found=0,
+                score=float('inf'),
+                status="error" if run_result.error else "no_pairs",
+                error_msg=run_result.error,
+                result=run_result.result,
+            ))
+
+    if progress_callback:
+        progress_callback(len(fasta_paths), len(fasta_paths), "Done")
+
+    return batch_results
+
+
+def format_hcr_batch_summary(results: List[HCRBatchResult]) -> str:
+    """Format HCR batch results as a TSV summary string."""
+    lines = ["Filename\tPairs_Found\tScore\tStatus\tError"]
+    for br in results:
+        score_str = f"{br.score:.4f}" if br.score != float('inf') else "N/A"
+        error_str = br.error_msg or ""
+        lines.append(f"{br.filename}\t{br.n_pairs_found}\t{score_str}\t{br.status}\t{error_str}")
+    return "\n".join(lines) + "\n"
+
+
+def package_hcr_batch_results_zip(results: List[HCRBatchResult]) -> bytes:
+    """Package all HCR batch results into a ZIP archive (in memory)."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for br in results:
+            if br.result is None or not br.result.pairs:
+                continue
+            prefix = br.filename
+            zf.writestr(f"{prefix}_HCR_oligos.txt", format_hcr_oligos(br.result))
+            zf.writestr(f"{prefix}_HCR_seq.txt", format_hcr_seq(br.result))
+            zf.writestr(f"{prefix}_HCR_hits.txt", format_hcr_hits(br.result))
+
+        zf.writestr("hcr_batch_summary.tsv", format_hcr_batch_summary(results))
 
     return buf.getvalue()
