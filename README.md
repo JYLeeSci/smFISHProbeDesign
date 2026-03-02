@@ -15,16 +15,17 @@ ProbeDesign creates oligonucleotide probes for single molecule RNA FISH experime
 ## Development Status
 
 **Completed** 
-- ✅ Streamlit GUI application
+- ✅ Create streamlit GUI application
 - ✅ Batch mode for CLI and GUI
-- ✅ Allow bowtie result output
-- ✅ Implement automated mixed-length probe design compatible with dynamic programming
-- ✅ Test streamlit application hosting on Glasgow VM
 - ✅ Implement homopolymer/dinucleotide filter
+- ✅ Implement automated mixed-length probe design compatible with dynamic programming
+- ✅ Allow bowtie result output
+- ✅ Implement HCRv3 probe design algorithms from the RShiny scripts
+- ✅ Host test streamlit application on Glasgow VM
+
 
 **In Development / Planned**
 - [ ] Test local RepeatMasker installation
-- [ ] Implement HCRv3 probe design algorithms from the RShiny scripts
 - [ ] Implement hairpin structure & inter-probe duplex formation filters
 
 ---

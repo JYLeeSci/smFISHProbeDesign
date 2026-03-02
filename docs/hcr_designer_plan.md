@@ -31,7 +31,7 @@ Skipping or relaxing transcriptome-wide alignment filtering for the lenient half
 | Pitfall | Mitigation |
 |-|-|
 | WW spacers for amplifiers B7+ are IUPAC ambiguity codes, not resolved sequences | Output `WW` directly in oligo sequences — IDT and other vendors accept IUPAC nomenclature. Provide CLI flag `--resolve-spacer AA` for users who want explicit bases |
-| Mixed-case initiator sequences in R script (lowercase = RNA-binding in output convention) | Normalise initiator sequences to uppercase internally; apply case convention only at output |
+| Mixed-case initiator sequences in R script (lowercase = RNA-binding in output convention) | Store initiator sequences with original case in AMPLIFIER_TABLE for reference; apply UPPERCASE case convention to spacer+initiator in output (binding region lowercase) |
 | Homopolymer filter must consider the full synthesised oligo (binding + spacer + initiator), not just the 25-nt binding region | Apply synthesis-quality filters to the complete oligo after initiator attachment |
 | Very short transcripts may yield zero valid pairs even with asymmetric leniency | Report clearly; suggest relaxing ΔG bounds or reducing requested pair count |
 | Genome/pseudogene mask levels: existing bowtie produces nucleotide-level masks on the full sequence | Reuse the existing single bowtie run on the full concatenated sequence (same as smFISH). Apply the resulting nucleotide-level mask **per-half**: for a pair at position `p`, check `mask[p:p+25]` (left) and `mask[p+27:p+52]` (right). Gap positions `p+25:p+27` are skipped. No separate bowtie runs per half needed |
@@ -87,8 +87,8 @@ class HCRProbeHalf:
 class HCRProbePair:
     """A complete HCR split-initiator probe pair."""
     pair_index: int         # 1-based pair number
-    left: HCRProbeHalf      # P1 — binds 5' portion of target window
-    right: HCRProbeHalf     # P2 — binds 3' portion of target window
+    left: HCRProbeHalf      # Binds 5' portion of target window (P2 in output — carries initiator_a)
+    right: HCRProbeHalf     # Binds 3' portion of target window (P1 in output — carries initiator_b)
     pair_position: int      # Start of the 52-nt window on target
     combined_badness: float
     amplifier: str          # e.g. "B1"
@@ -250,21 +250,146 @@ dp[p][k] = min(
 
 **Computational cost:** O(N × K) where N = sequence length, K = max pairs. For a typical transcript (≤5000 nt) and ≤50 pairs, this is trivial (<1ms). No performance concerns.
 
-### 4.4 Initiator attachment
+### 4.4 Initiator attachment and orientation
 
-After DP selects pair positions, attach initiator sequences using the amplifier lookup table:
+After DP selects pair positions, attach initiator sequences using the amplifier lookup table.
+
+**Probe structure (initiators point INWARD toward the 2-nt gap):**
 
 ```
-P1 (left half):  5'—[binding_rc_left]—[spacer_b]—[initiator_b]—3'
-P2 (right half): 5'—[initiator_a]—[spacer_a]—[binding_rc_right]—3'
+P1 (odd probes, binds RIGHT half):  5'—[RC(right)]—[spacer_b]—[initiator_b]—3'
+P2 (even probes, binds LEFT half):  5'—[initiator_a]—[spacer_a]—[RC(left)]—3'
 ```
 
-Where `binding_rc` is the reverse complement of the target-binding region (since probes are antisense DNA).
+Where `RC(left)` and `RC(right)` are the reverse complements of the left and right 25-nt
+target-binding regions respectively (since probes are antisense DNA).
 
-**WW spacer handling:** For amplifiers B7–B17, the R script uses `WW` (IUPAC: A or T). Implementation:
+**Why initiators must point inward:**
+
+In HCR v3.0, the two half-initiators on adjacent probes must be spatially proximal to
+cooperatively nucleate hairpin polymerisation. When both probes hybridise to the target,
+their initiator tails must converge at the 2-nt gap between binding sites. If initiators
+pointed outward, they would be ~50 nt apart and unable to co-trigger HCR.
+
+
+**Validated against reference R script output (Dmel cip4-exon, amplifier B1):**
+
+Reference pair id_618 (target position 618-669) and our pair 2 (target position 620-671)
+bind nearly the same target region (2 nt offset). Both produce structurally identical probes:
+
+```
+Reference (R script):
+  P1 (01): ggacagatcctcgaagggtatgtccTAgAAgAgTCTTCCTTTACg
+           |-----RC(right) 25nt----||--spacer_b+init_b--|
+           binding (lowercase)      tail (mixed case)
+
+  P2 (02): gAggAgggCAgCAAACggAAtggtggcgtgaaaccagattgatat
+           |--init_a+spacer_a--||------RC(left) 25nt----|
+           head (mixed case)    binding (lowercase)
+
+Our output (Python):
+  P1 (01): ttggacagatcctcgaagggtatgtTAGAAGAGTCTTCCTTTACG
+           |-----RC(right) 25nt----||--spacer_b+init_b--|
+           binding (lowercase)      tail (UPPERCASE)
+
+  P2 (02): GAGGAGGGCAGCAAACGGAActtggtggcgtgaaaccagattgat
+           |--init_a+spacer_a--||------RC(left) 25nt----|
+           head (UPPERCASE)     binding (lowercase)
+
+Structure comparison:
+  P1 structure:  5'--binding_rc--spacer_b--init_b--3'     MATCH
+  P2 structure:  5'--init_a--spacer_a--binding_rc--3'     MATCH
+  init_b seq:    GAAGAGTCTTCCTTTACG (B1)                  MATCH
+  init_a seq:    GAGGAGGGCAGCAAACGG (B1)                  MATCH
+  spacer_b:      TA (B1)                                  MATCH
+  spacer_a:      AA (B1)                                  MATCH
+  Orientation:   Both initiators point INWARD              MATCH
+  Case:          Our output uses UPPERCASE for initiators  (design choice)
+
+ 5'-IIIIIIIIIIIIIII  IIIIIIIIIIIIIII-3'       
+                  S  S
+                  S  S
+       3'-NNNNNNNNN  NNNNNNNNNN-5'
+5'-NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN-3' target mRNA
+```
+
+**WW spacer handling:** For amplifiers B7-B17, the R script uses `WW` (IUPAC: A or T). Implementation:
 - **Default: output `WW` directly** in the oligo sequence. Oligo vendors (IDT, Sigma, etc.) routinely accept IUPAC ambiguity codes and synthesise a degenerate pool.
 - CLI flag `--resolve-spacer` to override with explicit bases (e.g. `--resolve-spacer AA` or `--resolve-spacer TT`)
 - When WW is output, the full oligo length comment in the output file notes "contains degenerate bases"
+
+**Folded probe architecture — actual sequences from Dmel cip4-exon pair 2 (amplifier B1):**
+
+When both P1 and P2 hybridise to adjacent target sites, the single-stranded spacer+initiator
+tails fold away from the target and converge at the 2-nt gap. This spatial proximity enables
+cooperative nucleation of HCR hairpin polymerisation.
+
+```
+================================================================================
+         FOLDED HCR PROBE PAIR ON TARGET
+         Dmel cip4-exon pair 2, amplifier B1
+================================================================================
+
+              HALF-INITIATORS CONVERGE AT GAP
+              (single-stranded, not hybridised)
+                          |
+                          V
+       P2 init_a (18nt)                   P1 init_b (18nt)
+     5'-GAGGAGGGCAGCAAACGG                 GAAGAGTCTTCCTTTACG-3'
+                         \                 /
+                         A|               |T   <-- spacer_a (AA)
+                         A|     2nt       |A   <-- spacer_b (TA)
+                          |     gap       |
+                          |      |        |
+  3'-TAGTTAGACCAAAGTGCGGTGGTTC   |  TGTATGGGAAGCTCCTAGACAGGTT-5'  <-- PROBES
+      |||||||||||||||||||||||||  |   |||||||||||||||||||||||||      (antisense)
+  5'-ATCAATCTGGTTTCACGCCACCAAG--GG--ACATACCCTTCGAGGATCTGTCCAA-3'   <-- TARGET
+      <------ LEFT_HALF ------>  gap  <------ RIGHT_HALF ------>
+             (25 nt)                          (25 nt)
+          pos 620-644           645-6       pos 647-671
+
+--------------------------------------------------------------------------------
+COMPONENT LEGEND
+--------------------------------------------------------------------------------
+
+TARGET mRNA (5'-->3'):
+  LEFT_HALF  = ATCAATCTGGTTTCACGCCACCAAG   (25 nt, pos 620-644)
+  gap        = GG                          (2 nt,  pos 645-646)
+  RIGHT_HALF = ACATACCCTTCGAGGATCTGTCCAA   (25 nt, pos 647-671)
+
+P2 OLIGO -- binds LEFT_HALF (read 5'-->3' as synthesised):
+  +--------------------+----+---------------------------+
+  | init_a (18 nt)     | AA | RC(LEFT_HALF) (25 nt)     |
+  | GAGGAGGGCAGCAAACGG | AA | cttggtggcgtgaaaccagattgat |
+  +--------------------+----+---------------------------+
+  <-- 5' end                                3' end -->
+
+P1 OLIGO -- binds RIGHT_HALF (read 5'-->3' as synthesised):
+  +---------------------------+----+--------------------+
+  | RC(RIGHT_HALF) (25 nt)    | TA | init_b (18 nt)     |
+  | ttggacagatcctcgaagggtatgt | TA | GAAGAGTCTTCCTTTACG |
+  +---------------------------+----+--------------------+
+  <-- 5' end                                3' end -->
+
+--------------------------------------------------------------------------------
+HYBRIDISATION GEOMETRY
+--------------------------------------------------------------------------------
+
+  * P2's 3' end (binding region) aligns to LEFT_HALF's 5' end (anti-parallel)
+  * P2's 5' end (init_a) protrudes INWARD toward the gap
+  * P1's 5' end (binding region) aligns to RIGHT_HALF's 3' end (anti-parallel)
+  * P1's 3' end (init_b) protrudes INWARD toward the gap
+  * Both spacer+initiator tails are single-stranded and fold UP from the target
+  * The two half-initiators converge above the 2-nt gap --> cooperative HCR
+
+================================================================================
+```
+
+Full synthesised oligos (lowercase = target-binding, UPPERCASE = spacer + initiator):
+```
+P1 (HCRB1_01): 5'-ttggacagatcctcgaagggtatgtTAGAAGAGTCTTCCTTTACG-3'  (45 nt)
+P2 (HCRB1_02): 5'-GAGGAGGGCAGCAAACGGAActtggtggcgtgaaaccagattgat-3'  (45 nt)
+```
 
 ### 4.5 Post-DP validation
 
@@ -333,15 +458,15 @@ Tab-separated, one row per oligo (two rows per pair). Case convention: **lowerca
 
 ```
 pair	half	start	GC%	Tm	Gibbs	strict	full_oligo	name
-1	P1	42	52.0	62.1	-30.8	yes	acgtacgtacgtacgtacgtacgtaTAgAAGAgTCTTCCTTTACg	GENE_HCRB1_01
-1	P2	69	48.0	59.3	-29.5	yes	gAggAgggCAgCAAACggAAacgtacgtacgtacgtacgtacgta	GENE_HCRB1_02
-2	P1	156	56.0	64.2	-32.1	yes	acgtacgtacgtacgtacgtacgtaTAgAAGAgTCTTCCTTTACg	GENE_HCRB1_03
-2	P2	183	44.0	57.8	-28.3	no	gAggAgggCAgCAAACggAAacgtacgtacgtacgtacgtacgta	GENE_HCRB1_04
+1	P1	69	52.0	62.1	-30.8	yes	acgtacgtacgtacgtacgtacgtaTAGAAGAGTCTTCCTTTACG	GENE_HCRB1_01
+1	P2	42	48.0	59.3	-29.5	yes	GAGGAGGGCAGCAAACGGAAacgtacgtacgtacgtacgtacgta	GENE_HCRB1_02
+2	P1	183	56.0	64.2	-32.1	yes	acgtacgtacgtacgtacgtacgtaTAGAAGAGTCTTCCTTTACG	GENE_HCRB1_03
+2	P2	156	44.0	57.8	-28.3	no	GAGGAGGGCAGCAAACGGAAacgtacgtacgtacgtacgtacgta	GENE_HCRB1_04
 ```
 
 Column definitions:
 - `pair`: Pair number (1-based)
-- `half`: P1 (left, carries initiator_b at 3') or P2 (right, carries initiator_a at 5')
+- `half`: P1 (binds right half, carries initiator_b at 3') or P2 (binds left half, carries initiator_a at 5')
 - `start`: Start position of the 25-nt binding region on the target
 - `GC%`, `Tm`, `Gibbs`: Thermodynamic properties of the 25-nt binding region only
 - `strict`: Whether this half passed strict filtering (`yes`/`no`; `no` = lenient half in asymmetric mode)
@@ -370,17 +495,17 @@ Each pair is shown as a single line with left half, 2-nt gap (`--`), and right h
 Bowtie hit summary, split by half:
 
 ```
-=== Pair 1, P1 (left, pos 42-66, STRICT) ===
+=== Pair 1, P1 (right, pos 69-93, STRICT) ===
 Pseudogene hits: 0
 Genome hits: chr1:12345 (1 mismatch), chr5:67890 (2 mismatches)
 
-=== Pair 1, P2 (right, pos 69-93, STRICT) ===
+=== Pair 1, P2 (left, pos 42-66, STRICT) ===
 Pseudogene hits: 0
 Genome hits: none
 
-=== Pair 2, P1 (left, pos 156-180, STRICT) ===
+=== Pair 2, P1 (right, pos 183-207, STRICT) ===
 ...
-=== Pair 2, P2 (right, pos 183-207, LENIENT — hits not used for filtering) ===
+=== Pair 2, P2 (left, pos 156-180, LENIENT — hits not used for filtering) ===
 Pseudogene hits: 1
 Genome hits: chr3:11111 (0 mismatches)
 ```
@@ -389,7 +514,7 @@ This makes it transparent which half was lenient and that its hits were recorded
 
 ### 6.4 Naming convention
 
-Odd numbers = P1 (left half), even numbers = P2 (right half). This follows the R script convention and is intuitive: pair N has oligos `2N-1` (P1) and `2N` (P2).
+Odd numbers = P1 (binds right half of target), even numbers = P2 (binds left half of target). This follows the R script convention: the full reverse complement of the 52-nt target block is split into first half (P1, odd) and second half (P2, even). P1 carries initiator_b and P2 carries initiator_a.
 
 ---
 
@@ -685,7 +810,7 @@ Each test below references a specific fixture and states the exact expected outc
 | `test_r_mask_always_symmetric` | MASK_ONE_HALF | Apply R-mask (repeat type) to left half only. Asymmetric bowtie mode. | Pair `inf` — R-mask is always symmetric, even with asymmetric bowtie. |
 | `test_dp_no_overlap` | MULTI_PAIR | Run DP requesting 2 pairs with spacing=2. | Two pairs found; `start_2 - start_1 >= 54`. |
 | `test_dp_maximise_pairs` | MULTI_PAIR | DP with spacing=2, requesting 5 pairs. | Returns maximum possible pairs (≤ `len(seq) // 54`); prefers more pairs over lower badness. |
-| `test_initiator_B1` | (any) | Call `attach_initiators(amplifier="B1")` with a known binding sequence. | P1 = `binding_rc + "TA" + initiator_b_B1` (3' attachment). P2 = `initiator_a_B1 + "AA" + binding_rc` (5' attachment). Lengths correct. |
+| `test_initiator_B1` | (any) | Call `attach_initiators(amplifier="B1")` with different left/right binding sequences. | P1 = `RC(right) + "TA" + initiator_b_B1` (binds right half, init_b at 3'). P2 = `initiator_a_B1 + "AA" + RC(left)` (binds left half, init_a at 5'). Both initiators point inward. |
 | `test_initiator_all_amplifiers` | (any) | Call `attach_initiators()` for all B1–B17. | All produce oligos with correct structure. WW spacers output as "WW" by default. |
 | `test_ww_spacer_default_iupac` | (any) | Call `attach_initiators(amplifier="B9")` without `--resolve-spacer`. | Spacer in output oligo is literally "WW" (IUPAC). |
 | `test_ww_spacer_resolved` | (any) | Call `attach_initiators(amplifier="B9", resolve_spacer="AA")`. | Spacer in output oligo is "AA". |
@@ -785,7 +910,7 @@ These are explicitly **not** part of the initial implementation:
 | WW spacer output as IUPAC (not resolved) | IDT and other vendors accept IUPAC ambiguity codes; degenerate pools are biologically appropriate; `--resolve-spacer` flag available for explicit bases |
 | Initiator data as code constants | Avoids external file dependencies; sequences are stable and published |
 | Lowercase/uppercase output convention | Clear visual separation of binding vs initiator regions in oligo orders |
-| Odd/even naming for P1/P2 | Follows R script convention; intuitive pairing |
+| Odd/even naming for P1/P2 | P1 (odd) binds right half with init_b, P2 (even) binds left half with init_a — initiators point inward toward gap; matches R script convention |
 | Multipage Streamlit with `st.navigation` | Clean separation between smFISH and HCR; independent sidebars; no UI clutter from conditional visibility |
 | Test-gated development phases | Each phase's tests written first and must pass before proceeding; prevents accumulation of hidden bugs |
 | R/L masks always symmetric, P/B masks potentially asymmetric | Repeat regions and synthesis quality affect both halves regardless; off-target specificity is the property being relaxed for the lenient half |

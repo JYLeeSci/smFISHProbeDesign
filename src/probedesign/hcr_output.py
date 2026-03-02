@@ -39,17 +39,19 @@ def format_hcr_oligos(result: HCRDesignResult) -> str:
         left_start = _nucleotide_position(result.input_sequence, pair.left.position)
         right_start = _nucleotide_position(result.input_sequence, pair.right.position)
 
+        # P1 (odd) = right half of target (carries initiator_b)
         lines.append(
-            f"{pair.pair_index}\tP1\t{left_start}\t"
-            f"{pair.left.gc_percent}\t{pair.left.tm}\t{pair.left.gibbs_fe}\t"
-            f"{'yes' if pair.left.is_strict else 'no'}\t"
-            f"{pair.left.oligo_seq}\t{p1_name}"
-        )
-        lines.append(
-            f"{pair.pair_index}\tP2\t{right_start}\t"
+            f"{pair.pair_index}\tP1\t{right_start}\t"
             f"{pair.right.gc_percent}\t{pair.right.tm}\t{pair.right.gibbs_fe}\t"
             f"{'yes' if pair.right.is_strict else 'no'}\t"
-            f"{pair.right.oligo_seq}\t{p2_name}"
+            f"{pair.right.oligo_seq}\t{p1_name}"
+        )
+        # P2 (even) = left half of target (carries initiator_a)
+        lines.append(
+            f"{pair.pair_index}\tP2\t{left_start}\t"
+            f"{pair.left.gc_percent}\t{pair.left.tm}\t{pair.left.gibbs_fe}\t"
+            f"{'yes' if pair.left.is_strict else 'no'}\t"
+            f"{pair.left.oligo_seq}\t{p2_name}"
         )
 
     return "\n".join(lines) + "\n"
@@ -153,7 +155,7 @@ def format_hcr_hits(result: HCRDesignResult) -> str:
 
     lines = []
     for pair in result.pairs:
-        for half_label, half in [("P1 (left", pair.left), ("P2 (right", pair.right)]:
+        for half_label, half in [("P1 (right", pair.right), ("P2 (left", pair.left)]:
             strict_label = "STRICT" if half.is_strict else "LENIENT"
             start = _nucleotide_position(result.input_sequence, half.position)
             end = start + HALF_LENGTH - 1

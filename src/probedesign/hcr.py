@@ -70,8 +70,8 @@ class HCRProbeHalf:
 class HCRProbePair:
     """A complete HCR split-initiator probe pair."""
     pair_index: int         # 1-based pair number
-    left: HCRProbeHalf      # P1 — binds 5' portion of target window
-    right: HCRProbeHalf     # P2 — binds 3' portion of target window
+    left: HCRProbeHalf      # Binds 5' portion of target window (P2 in output — carries initiator_a)
+    right: HCRProbeHalf     # Binds 3' portion of target window (P1 in output — carries initiator_b)
     pair_position: int      # Start of the 52-nt window on target
     combined_badness: float
     amplifier: str          # e.g. "B1"
@@ -310,10 +310,11 @@ def attach_initiators(
 ) -> Tuple[str, str]:
     """Attach initiator sequences to binding regions.
 
-    P1 (left):  5'—binding_rc—spacer_b—initiator_b—3'
-    P2 (right): 5'—initiator_a—spacer_a—binding_rc—3'
+    P1 (odd probes, binds RIGHT half):  5'—RC(right)—spacer_b—initiator_b—3'
+    P2 (even probes, binds LEFT half):  5'—initiator_a—spacer_a—RC(left)—3'
 
-    Case convention: binding region lowercase, spacer+initiator UPPERCASE.
+    Both initiator tails point INWARD toward the 2-nt gap for cooperative
+    HCR triggering. Case convention: binding region lowercase, spacer+initiator UPPERCASE.
 
     Args:
         binding_seq_left: 25-nt sense strand of left half
@@ -337,11 +338,13 @@ def attach_initiators(
     rc_left = reverse_complement(binding_seq_left)
     rc_right = reverse_complement(binding_seq_right)
 
-    # P1: binding_rc (lowercase) + spacer_b + initiator_b (UPPERCASE)
-    p1_oligo = rc_left.lower() + (spacer_b + amp["initiator_b"]).upper()
+    # P1 (odd probes): 5'—RC(right)—spacer_b—initiator_b—3'
+    # Binds RIGHT half of target; initiator_b at 3' end points inward toward gap
+    p1_oligo = rc_right.lower() + (spacer_b + amp["initiator_b"]).upper()
 
-    # P2: initiator_a + spacer_a (UPPERCASE) + binding_rc (lowercase)
-    p2_oligo = (amp["initiator_a"] + spacer_a).upper() + rc_right.lower()
+    # P2 (even probes): 5'—initiator_a—spacer_a—RC(left)—3'
+    # Binds LEFT half of target; initiator_a at 5' end points inward toward gap
+    p2_oligo = (amp["initiator_a"] + spacer_a).upper() + rc_left.lower()
 
     return p1_oligo, p2_oligo
 
@@ -556,7 +559,7 @@ def design_hcr_probes(
             tm=round(tm_rna_dna(left_seq), 1),
             gibbs_fe=round(gibbs_rna_dna(left_seq), 1),
             is_strict=left_strict,
-            oligo_seq=p1_oligo,
+            oligo_seq=p2_oligo,   # P2 binds left half (carries initiator_a)
         )
 
         right_half = HCRProbeHalf(
@@ -568,7 +571,7 @@ def design_hcr_probes(
             tm=round(tm_rna_dna(right_seq), 1),
             gibbs_fe=round(gibbs_rna_dna(right_seq), 1),
             is_strict=right_strict,
-            oligo_seq=p2_oligo,
+            oligo_seq=p1_oligo,   # P1 binds right half (carries initiator_b)
         )
 
         pair = HCRProbePair(

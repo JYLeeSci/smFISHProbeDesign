@@ -291,23 +291,23 @@ def _show_hcr_results():
             pair_data.append({
                 "Pair": pair.pair_index,
                 "Half": "P1",
-                "Start": pair.left.position + 1,
-                "GC%": pair.left.gc_percent,
-                "Tm": pair.left.tm,
-                "Gibbs": pair.left.gibbs_fe,
-                "Strict": "yes" if pair.left.is_strict else "no",
-                "Oligo": pair.left.oligo_seq,
-                "Name": f"{result.template_name}_HCR{result.amplifier}_{p1_id}",
-            })
-            pair_data.append({
-                "Pair": pair.pair_index,
-                "Half": "P2",
                 "Start": pair.right.position + 1,
                 "GC%": pair.right.gc_percent,
                 "Tm": pair.right.tm,
                 "Gibbs": pair.right.gibbs_fe,
                 "Strict": "yes" if pair.right.is_strict else "no",
                 "Oligo": pair.right.oligo_seq,
+                "Name": f"{result.template_name}_HCR{result.amplifier}_{p1_id}",
+            })
+            pair_data.append({
+                "Pair": pair.pair_index,
+                "Half": "P2",
+                "Start": pair.left.position + 1,
+                "GC%": pair.left.gc_percent,
+                "Tm": pair.left.tm,
+                "Gibbs": pair.left.gibbs_fe,
+                "Strict": "yes" if pair.left.is_strict else "no",
+                "Oligo": pair.left.oligo_seq,
                 "Name": f"{result.template_name}_HCR{result.amplifier}_{p2_id}",
             })
         df = pd.DataFrame(pair_data)
@@ -628,20 +628,20 @@ else:
                         pair_data.append({
                             "Pair": pair.pair_index,
                             "Half": "P1",
-                            "GC%": pair.left.gc_percent,
-                            "Tm": pair.left.tm,
-                            "Gibbs": pair.left.gibbs_fe,
-                            "Strict": "yes" if pair.left.is_strict else "no",
-                            "Oligo": pair.left.oligo_seq,
-                        })
-                        pair_data.append({
-                            "Pair": pair.pair_index,
-                            "Half": "P2",
                             "GC%": pair.right.gc_percent,
                             "Tm": pair.right.tm,
                             "Gibbs": pair.right.gibbs_fe,
                             "Strict": "yes" if pair.right.is_strict else "no",
                             "Oligo": pair.right.oligo_seq,
+                        })
+                        pair_data.append({
+                            "Pair": pair.pair_index,
+                            "Half": "P2",
+                            "GC%": pair.left.gc_percent,
+                            "Tm": pair.left.tm,
+                            "Gibbs": pair.left.gibbs_fe,
+                            "Strict": "yes" if pair.left.is_strict else "no",
+                            "Oligo": pair.left.oligo_seq,
                         })
                     st.dataframe(
                         pd.DataFrame(pair_data),

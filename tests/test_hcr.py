@@ -317,21 +317,22 @@ class TestInitiatorAttachment:
     def test_initiator_b1(self):
         """B1 initiator attachment produces correct oligo structure."""
         binding_left = "atcgatcgatcgatcgatcgatcga"
-        binding_right = "atcgatcgatcgatcgatcgatcga"
+        binding_right = "gctagctagctagctagctagctag"  # different from left
         p1, p2 = attach_initiators(binding_left, binding_right, "B1")
 
-        rc = reverse_complement(binding_left)
+        rc_left = reverse_complement(binding_left)
+        rc_right = reverse_complement(binding_right)
         amp = AMPLIFIER_TABLE["B1"]
 
-        # P1: binding_rc(lower) + spacer_b + initiator_b (UPPER)
+        # P1: RC(right) + spacer_b + initiator_b — binds RIGHT half, init_b points inward
         expected_tail = (amp["spacer_b"] + amp["initiator_b"]).upper()
-        assert p1 == rc.lower() + expected_tail
+        assert p1 == rc_right.lower() + expected_tail
         assert p1[:25].islower(), "Binding region should be lowercase"
         assert p1[25:].isupper(), "Spacer+initiator should be uppercase"
 
-        # P2: initiator_a + spacer_a (UPPER) + binding_rc(lower)
+        # P2: initiator_a + spacer_a + RC(left) — binds LEFT half, init_a points inward
         expected_head = (amp["initiator_a"] + amp["spacer_a"]).upper()
-        assert p2 == expected_head + rc.lower()
+        assert p2 == expected_head + rc_left.lower()
 
     def test_initiator_all_amplifiers(self):
         """All amplifiers produce oligos with correct structure."""
